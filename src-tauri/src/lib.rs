@@ -376,8 +376,8 @@ async fn show_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
 
     println!("Work area: x={}, y={}, w={}, h={}", work_x, work_y, work_width, work_height);
 
-    // Bar dimensions
-    let bar_height = 56;
+    // Bar dimensions - increased to accommodate focused task with glow effects
+    let bar_height = 68;
 
     // Use 98% of work area width, centered
     let bar_width = (work_width as f64 * 0.98) as i32;

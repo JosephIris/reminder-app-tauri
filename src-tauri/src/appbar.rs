@@ -26,20 +26,20 @@ const APPBAR_CALLBACK: u32 = WM_USER + 1;
 #[cfg(windows)]
 pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i32), String> {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
-    use windows::Win32::UI::HiDpi::GetDpiForSystem;
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
 
     const DEFAULT_DPI: u32 = 96;  // Standard Windows DPI (100% scaling)
 
     let hwnd = HWND(hwnd as *mut _);
 
-    // Get DPI scale
-    let dpi = unsafe { GetDpiForSystem() };
+    // Get DPI scale for this specific window (more accurate than system DPI)
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
     let scale = dpi as f64 / DEFAULT_DPI as f64;
 
     // Convert logical bar height to physical pixels for Windows API
-    let physical_bar_height = (bar_height as f64 * scale) as i32;
+    let physical_bar_height = (bar_height as f64 * scale).round() as i32;
 
-    println!("DPI: {}, scale: {}, logical bar height: {}, physical: {}",
+    println!("DPI: {}, scale: {:.3}, logical bar height: {}, physical: {}",
              dpi, scale, bar_height, physical_bar_height);
 
     // Get work area (screen minus existing appbars like taskbar)
@@ -57,26 +57,29 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     let work_area = monitor_info.rcWork;
     let monitor_area = monitor_info.rcMonitor;
 
-    println!("Monitor area: left={}, top={}, right={}, bottom={}",
+    println!("Monitor area (physical): left={}, top={}, right={}, bottom={}",
              monitor_area.left, monitor_area.top, monitor_area.right, monitor_area.bottom);
-    println!("Work area: left={}, top={}, right={}, bottom={}",
+    println!("Work area (physical): left={}, top={}, right={}, bottom={}",
              work_area.left, work_area.top, work_area.right, work_area.bottom);
 
-    // Use monitor_area for left/right (full screen width) and work_area for bottom (above taskbar)
-    // This ensures the bar spans the full screen width starting at x=0
+    // Use work_area for positioning - this already excludes the taskbar
+    // The bar should be positioned at the bottom of the work area
     let mut abd = APPBARDATA {
         cbSize: std::mem::size_of::<APPBARDATA>() as u32,
         hWnd: hwnd,
         uCallbackMessage: APPBAR_CALLBACK,
         uEdge: ABE_BOTTOM,
         rc: RECT {
-            left: monitor_area.left,  // Use monitor area left (should be 0 for primary)
+            left: work_area.left,
             top: work_area.bottom - physical_bar_height,
-            right: monitor_area.right,  // Use monitor area right (full width)
+            right: work_area.right,
             bottom: work_area.bottom,
         },
         lParam: LPARAM(0),
     };
+
+    println!("Requesting appbar rect (physical): left={}, top={}, right={}, bottom={}",
+             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
 
     // Register the appbar
     let result = unsafe { SHAppBarMessage(ABM_NEW, &mut abd) };
@@ -89,21 +92,23 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     // Query the position to see what space is available
     unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut abd) };
 
-    println!("After QUERYPOS: {:?}", abd.rc);
+    println!("After QUERYPOS (physical): left={}, top={}, right={}, bottom={}",
+             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
 
-    // Set the final position
+    // Set the final position - ensure we request exactly the height we need
     abd.rc.top = abd.rc.bottom - physical_bar_height;
     unsafe { SHAppBarMessage(ABM_SETPOS, &mut abd) };
 
-    println!("After SETPOS (physical): {:?}", abd.rc);
+    println!("After SETPOS (physical): left={}, top={}, right={}, bottom={}",
+             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
 
-    // Convert back to logical pixels for Tauri
-    let logical_x = (abd.rc.left as f64 / scale) as i32;
-    let logical_y = (abd.rc.top as f64 / scale) as i32;
-    let logical_w = ((abd.rc.right - abd.rc.left) as f64 / scale) as i32;
-    let logical_h = ((abd.rc.bottom - abd.rc.top) as f64 / scale) as i32;
+    // Convert back to logical pixels for Tauri using precise rounding
+    let logical_x = (abd.rc.left as f64 / scale).round() as i32;
+    let logical_y = (abd.rc.top as f64 / scale).round() as i32;
+    let logical_w = ((abd.rc.right - abd.rc.left) as f64 / scale).round() as i32;
+    let logical_h = ((abd.rc.bottom - abd.rc.top) as f64 / scale).round() as i32;
 
-    println!("Returning logical rect: ({}, {}, {}, {})", logical_x, logical_y, logical_w, logical_h);
+    println!("Returning logical rect: x={}, y={}, w={}, h={}", logical_x, logical_y, logical_w, logical_h);
 
     Ok((logical_x, logical_y, logical_w, logical_h))
 }
