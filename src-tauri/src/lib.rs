@@ -417,12 +417,12 @@ async fn show_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
                 Ok((appbar_x, appbar_y, appbar_w, appbar_h)) => {
                     println!("AppBar registered at: ({}, {}), size: {}x{}", appbar_x, appbar_y, appbar_w, appbar_h);
                     // Position the window to fill the appbar reserved space
-                    // Use full width from appbar, centered content handled by CSS
-                    let _ = window.set_position(tauri::Position::Physical(
-                        tauri::PhysicalPosition::new(appbar_x, appbar_y)
+                    // appbar returns logical pixels, so use Logical positioning
+                    let _ = window.set_position(tauri::Position::Logical(
+                        tauri::LogicalPosition::new(appbar_x as f64, appbar_y as f64)
                     ));
-                    let _ = window.set_size(tauri::Size::Physical(
-                        tauri::PhysicalSize::new(appbar_w as u32, appbar_h as u32)
+                    let _ = window.set_size(tauri::Size::Logical(
+                        tauri::LogicalSize::new(appbar_w as f64, appbar_h as f64)
                     ));
                 }
                 Err(e) => {
@@ -456,7 +456,7 @@ pub fn run() {
     let storage = Storage::new().expect("Failed to initialize storage");
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // .plugin(tauri_plugin_updater::Builder::new().build())  // Disabled temporarily
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
