@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reminder Bar</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html, body {
+        background: transparent;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        overflow: visible;
+        user-select: none;
+        height: 100%;
+      }
+
+      @property --gradient-angle {
+        syntax: "<angle>";
+        initial-value: 0deg;
+        inherits: false;
+      }
+
+      .bar-container {
+        height: 100%;
+        background: rgba(13, 13, 13, 0.95);
+        backdrop-filter: blur(10px);
+        border-top: 1px solid #333;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 16px;
+        gap: 12px;
+        overflow: visible;
+      }
+
+      .bar-container::-webkit-scrollbar {
+        height: 4px;
+      }
+
+      .bar-container::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .bar-container::-webkit-scrollbar-thumb {
+        background: #404040;
+        border-radius: 2px;
+      }
+
+      .reminder-card {
+        flex-shrink: 0;
+        background: #262626;
+        border: 1px solid #404040;
+        border-radius: 8px;
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 200px;
+        max-width: 280px;
+        height: 40px;
+        cursor: grab;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      /* Minimized cards when another is focused */
+      .bar-container.has-focus .focus-wrapper:not(.active) .reminder-card {
+        min-width: 100px;
+        max-width: 100px;
+        padding: 8px 10px;
+        gap: 8px;
+      }
+
+      
+      .bar-container.has-focus .focus-wrapper:not(.active) .card-message {
+        font-size: 11px;
+      }
+
+      .reminder-card:hover {
+        background: #333;
+        border-color: #505050;
+      }
+
+      /* Disable hover effects during drag */
+      body.dragging-active .reminder-card:hover {
+        background: #262626;
+        border-color: #404040;
+      }
+
+      body.dragging-active .card-btn:hover {
+        background: #1a1a1a;
+        color: #a1a1aa;
+      }
+
+      .reminder-card.dragging {
+        opacity: 0.8;
+        cursor: grabbing;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+
+      .focus-wrapper {
+        position: relative;
+        padding: 2px;
+        border-radius: 10px;
+        flex-shrink: 0;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      @property --glow-opacity {
+        syntax: "<number>";
+        initial-value: 0.4;
+        inherits: false;
+      }
+
+      .focus-wrapper.active {
+        background: conic-gradient(
+          from var(--gradient-angle),
+          #8b5cf6,
+          #6366f1,
+          #3b82f6,
+          #06b6d4,
+          #8b5cf6
+        );
+        animation: gradient-rotate 2s linear infinite, glow-pulse 2s ease-in-out infinite;
+        box-shadow:
+          0 0 20px rgba(139, 92, 246, var(--glow-opacity)),
+          0 0 40px rgba(99, 102, 241, calc(var(--glow-opacity) * 0.5));
+      }
+
+      .focus-wrapper.active .reminder-card {
+        border-color: transparent;
+        overflow: hidden;
+        position: relative;
+        min-width: 320px;
+        max-width: 380px;
+        height: 48px;
+        padding: 10px 14px;
+      }
+
+      .focus-wrapper.active .card-message {
+        font-size: 14px;
+      }
+
+      .focus-wrapper.active .card-btn {
+        width: 32px;
+        height: 32px;
+        font-size: 13px;
+      }
+
+      .focus-wrapper.active .card-btn.snooze-inline {
+        width: 28px;
+        font-size: 11px;
+      }
+
+      /* Shimmer effect - diagonal sweep */
+      .focus-wrapper.active .reminder-card::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -100%;
+        width: 80%;
+        height: 200%;
+        background: linear-gradient(
+          120deg,
+          transparent 20%,
+          rgba(139, 92, 246, 0.08) 30%,
+          rgba(99, 102, 241, 0.15) 40%,
+          rgba(59, 130, 246, 0.2) 50%,
+          rgba(99, 102, 241, 0.15) 60%,
+          rgba(139, 92, 246, 0.08) 70%,
+          transparent 80%
+        );
+        animation: shimmer 5s ease-in-out infinite;
+        pointer-events: none;
+        transform: skewX(-20deg);
+      }
+
+      @keyframes gradient-rotate {
+        to {
+          --gradient-angle: 360deg;
+        }
+      }
+
+      @keyframes glow-pulse {
+        0%, 100% {
+          --glow-opacity: 0.3;
+        }
+        50% {
+          --glow-opacity: 0.6;
+        }
+      }
+
+      @keyframes shimmer {
+        0% {
+          left: -100%;
+        }
+        50%, 100% {
+          left: 200%;
+        }
+      }
+
+      .card-content {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .card-message {
+        color: #fafafa;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: font-size 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .card-time {
+        color: #a1a1aa;
+        font-size: 11px;
+        transition: opacity 0.2s ease;
+      }
+
+      .card-actions {
+        display: flex;
+        gap: 4px;
+        transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      /* Fade out actions/time instead of display:none for smooth animation */
+      .bar-container.has-focus .focus-wrapper:not(.active) .card-actions {
+        opacity: 0;
+        transform: scale(0.8);
+        pointer-events: none;
+        width: 0;
+        overflow: hidden;
+      }
+
+      .bar-container.has-focus .focus-wrapper:not(.active) .card-time {
+        opacity: 0;
+        height: 0;
+        margin: 0;
+      }
+
+      .card-btn {
+        border: none;
+        background: #1a1a1a;
+        color: #a1a1aa;
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      .card-btn:hover {
+        background: #333;
+        color: #fafafa;
+      }
+
+      .card-btn.complete:hover {
+        background: #22c55e;
+        color: white;
+      }
+
+      .card-btn.dismiss:hover {
+        background: #ef4444;
+        color: white;
+      }
+
+      .card-btn.snooze-inline {
+        font-size: 10px;
+        font-weight: 600;
+        width: 24px;
+      }
+
+      .card-btn.snooze-inline:hover {
+        background: #6366f1;
+        color: white;
+      }
+
+      /* Drag ghost - follows cursor */
+      .drag-ghost {
+        position: fixed;
+        pointer-events: none;
+        z-index: 10000;
+        opacity: 0.9;
+        transform: rotate(2deg);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      }
+
+      /* Original card becomes semi-transparent during drag */
+      .focus-wrapper.being-dragged .reminder-card {
+        opacity: 0.3;
+      }
+
+      /* Placeholder shows drop position */
+      .drag-placeholder {
+        flex-shrink: 0;
+        width: 200px;
+        height: 40px;
+        background: rgba(99, 102, 241, 0.2);
+        border: 2px dashed #6366f1;
+        border-radius: 8px;
+        margin: 0 6px;
+      }
+
+      .empty-state {
+        color: #71717a;
+        font-size: 13px;
+        padding: 0 8px;
+      }
+
+      /* Tooltip styles - compact to fit in bar */
+      .tooltip {
+        position: fixed;
+        background: #1a1a1a;
+        border: 1px solid #404040;
+        border-radius: 6px;
+        padding: 6px 10px;
+        z-index: 10000;
+        pointer-events: none;
+        max-width: 400px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .tooltip-message {
+        color: #fafafa;
+        font-size: 12px;
+        font-weight: 500;
+        word-wrap: break-word;
+      }
+
+      .tooltip-time {
+        color: #71717a;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar-container" id="bar-container">
+      <div class="empty-state">No reminders due</div>
+    </div>
+
+    <script type="module">
+      const { invoke } = window.__TAURI__.core;
+      const { listen, emit } = window.__TAURI__.event;
+
+      let reminders = [];
+      let orderedIds = [];
+      let focusedId = null;
+      let draggedId = null;
+      let dragStartX = 0;
+      let dragOffsetX = 0;
+      let isDragging = false;
+      let justFinishedDrag = false;
+      let tooltipEl = null;
+      let tooltipTimeout = null;
+      let ghostEl = null;
+      let placeholderEl = null;
+      let dropTargetIndex = -1;
+
+      console.log("Reminder bar script loaded");
+
+      // Create tooltip element
+      function createTooltip() {
+        if (!tooltipEl) {
+          tooltipEl = document.createElement('div');
+          tooltipEl.className = 'tooltip';
+          tooltipEl.style.display = 'none';
+          document.body.appendChild(tooltipEl);
+        }
+      }
+      createTooltip();
+
+      function showTooltip(reminder, x, y) {
+        if (!tooltipEl || isDragging) return;
+        const createdDate = new Date(reminder.created_at);
+        const createdStr = createdDate.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+        tooltipEl.innerHTML = `
+          <span class="tooltip-message">${reminder.message}</span>
+          <span class="tooltip-time">Created: ${createdStr}</span>
+        `;
+        // Position tooltip inside the bar window
+        const tooltipWidth = 420;  // approximate
+        tooltipEl.style.left = Math.min(Math.max(x - 100, 8), window.innerWidth - tooltipWidth) + 'px';
+        tooltipEl.style.top = '8px';
+        tooltipEl.style.bottom = 'auto';
+        tooltipEl.style.display = 'flex';
+      }
+
+      function hideTooltip() {
+        if (tooltipEl) {
+          tooltipEl.style.display = 'none';
+        }
+        if (tooltipTimeout) {
+          clearTimeout(tooltipTimeout);
+          tooltipTimeout = null;
+        }
+      }
+
+      function formatTime(isoString) {
+        const date = new Date(isoString);
+        return date.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+      }
+
+      function truncate(str, maxLen) {
+        return str.length > maxLen ? str.substring(0, maxLen - 1) + '...' : str;
+      }
+
+      async function handleComplete(id) {
+        await invoke("complete_reminder", { id });
+        // Emit to all windows - main will pick it up
+        await emit("refresh-reminders");
+      }
+
+      async function handleSnooze(id, minutes) {
+        await invoke("snooze_reminder", { id, minutes });
+        await emit("refresh-reminders");
+      }
+
+      function handleDismiss(id) {
+        orderedIds = orderedIds.filter(i => i !== id);
+        reminders = reminders.filter(r => r.id !== id);
+        render();
+      }
+
+      function handleFocus(id) {
+        focusedId = focusedId === id ? null : id;
+        render();
+      }
+
+      function handleDragStart(e, id) {
+        draggedId = id;
+        dragStartX = e.clientX;
+        isDragging = false;  // Not dragging until we move enough
+        hideTooltip();
+
+        const wrapper = e.target.closest('.focus-wrapper');
+        const rect = wrapper.getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left;
+
+        document.body.style.cursor = 'grabbing';
+      }
+
+      function createGhost(wrapper) {
+        const card = wrapper.querySelector('.reminder-card');
+        ghostEl = card.cloneNode(true);
+        ghostEl.className = 'reminder-card drag-ghost';
+        document.body.appendChild(ghostEl);
+        document.body.classList.add('dragging-active');
+        wrapper.classList.add('being-dragged');
+      }
+
+      function removeGhost() {
+        if (ghostEl) {
+          ghostEl.remove();
+          ghostEl = null;
+        }
+        document.body.classList.remove('dragging-active');
+        const dragged = document.querySelector('.being-dragged');
+        if (dragged) {
+          dragged.classList.remove('being-dragged');
+        }
+      }
+
+      function createPlaceholder() {
+        if (!placeholderEl) {
+          placeholderEl = document.createElement('div');
+          placeholderEl.className = 'drag-placeholder';
+        }
+        return placeholderEl;
+      }
+
+      function removePlaceholder() {
+        if (placeholderEl && placeholderEl.parentNode) {
+          placeholderEl.remove();
+        }
+      }
+
+      function handleDragMove(e) {
+        if (draggedId === null) return;
+
+        // Only start actual dragging after moving 5px
+        if (!isDragging && Math.abs(e.clientX - dragStartX) > 5) {
+          isDragging = true;
+          // Create ghost when drag actually starts
+          const wrapper = document.querySelector(`.focus-wrapper[data-id="${draggedId}"]`);
+          if (wrapper) {
+            createGhost(wrapper);
+          }
+        }
+
+        if (!isDragging) return;
+
+        // Move ghost to follow cursor
+        if (ghostEl) {
+          ghostEl.style.left = (e.clientX - dragOffsetX) + 'px';
+          ghostEl.style.top = (e.clientY - 20) + 'px';
+        }
+
+        const container = document.getElementById('bar-container');
+        const wrappers = Array.from(container.querySelectorAll('.focus-wrapper:not(.being-dragged)'));
+
+        // Find drop position
+        let newDropIndex = orderedIds.length; // Default to end
+
+        for (let i = 0; i < wrappers.length; i++) {
+          const wrapper = wrappers[i];
+          const rect = wrapper.getBoundingClientRect();
+          const midX = rect.left + rect.width / 2;
+
+          if (e.clientX < midX) {
+            newDropIndex = orderedIds.indexOf(parseInt(wrapper.dataset.id));
+            break;
+          }
+        }
+
+        // Account for dragged item position
+        const draggedIndex = orderedIds.indexOf(draggedId);
+        if (newDropIndex > draggedIndex) {
+          newDropIndex--;
+        }
+
+        // Update placeholder position if changed
+        if (newDropIndex !== dropTargetIndex) {
+          dropTargetIndex = newDropIndex;
+          removePlaceholder();
+
+          const placeholder = createPlaceholder();
+          const allWrappers = Array.from(container.querySelectorAll('.focus-wrapper'));
+
+          // Insert placeholder at correct position
+          let insertBeforeEl = null;
+          let count = 0;
+          for (const w of allWrappers) {
+            if (w.classList.contains('being-dragged')) continue;
+            if (count === dropTargetIndex) {
+              insertBeforeEl = w;
+              break;
+            }
+            count++;
+          }
+
+          if (insertBeforeEl) {
+            container.insertBefore(placeholder, insertBeforeEl);
+          } else {
+            container.appendChild(placeholder);
+          }
+        }
+      }
+
+      function handleDragEnd() {
+        const wasDragging = isDragging;
+        const didReorder = draggedId !== null && isDragging && dropTargetIndex !== -1;
+
+        if (didReorder) {
+          // Apply the reorder
+          const draggedIndex = orderedIds.indexOf(draggedId);
+          if (draggedIndex !== -1 && draggedIndex !== dropTargetIndex) {
+            orderedIds.splice(draggedIndex, 1);
+            orderedIds.splice(dropTargetIndex, 0, draggedId);
+          }
+        }
+
+        // Clean up
+        removeGhost();
+        removePlaceholder();
+        dropTargetIndex = -1;
+        draggedId = null;
+        isDragging = false;
+        document.body.style.cursor = '';
+
+        // Prevent click from firing focus after drag
+        if (wasDragging) {
+          justFinishedDrag = true;
+          setTimeout(() => { justFinishedDrag = false; }, 50);
+        }
+
+        // Only re-render if we actually reordered (otherwise click handler will handle it)
+        if (didReorder) {
+          render(true);  // Force recreate after reorder
+        }
+      }
+
+      function createCard(reminder, isFocused) {
+        const wrapper = document.createElement('div');
+        wrapper.className = `focus-wrapper${isFocused ? ' active' : ''}`;
+        wrapper.dataset.id = reminder.id;
+
+        const card = document.createElement('div');
+        card.className = 'reminder-card';
+
+        card.innerHTML = `
+          <div class="card-content">
+            <div class="card-message">${truncate(reminder.message, 30)}</div>
+            <div class="card-time">${formatTime(reminder.due_time)}</div>
+          </div>
+          <div class="card-actions">
+            <button class="card-btn snooze-inline" data-minutes="15" title="Snooze 15 min">15</button>
+            <button class="card-btn snooze-inline" data-minutes="60" title="Snooze 1 hour">60</button>
+            <button class="card-btn complete" title="Complete">&#10003;</button>
+            <button class="card-btn dismiss" title="Dismiss">&#10005;</button>
+          </div>
+        `;
+
+        // Event listeners
+        card.addEventListener('mousedown', (e) => {
+          if (e.target.closest('.card-actions')) return;
+          handleDragStart(e, reminder.id);
+        });
+
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.card-actions')) return;
+          if (!isDragging && !justFinishedDrag) {
+            handleFocus(reminder.id);
+          }
+        });
+
+        // Tooltip on hover (only on card-content, not buttons)
+        const cardContent = card.querySelector('.card-content');
+        cardContent.addEventListener('mouseenter', (e) => {
+          tooltipTimeout = setTimeout(() => {
+            showTooltip(reminder, e.clientX, e.clientY);
+          }, 400);  // Show after 400ms hover
+        });
+
+        cardContent.addEventListener('mouseleave', () => {
+          hideTooltip();
+        });
+
+        cardContent.addEventListener('mousemove', (e) => {
+          if (tooltipEl && tooltipEl.style.display === 'flex') {
+            tooltipEl.style.left = Math.min(e.clientX, window.innerWidth - 320) + 'px';
+          }
+        });
+
+        card.querySelector('.complete').addEventListener('click', () => handleComplete(reminder.id));
+        card.querySelector('.dismiss').addEventListener('click', () => handleDismiss(reminder.id));
+
+        card.querySelectorAll('.snooze-inline').forEach(btn => {
+          btn.addEventListener('click', () => {
+            handleSnooze(reminder.id, parseInt(btn.dataset.minutes));
+          });
+        });
+
+        wrapper.appendChild(card);
+        return wrapper;
+      }
+
+      function render(forceRecreate = false) {
+        const container = document.getElementById('bar-container');
+
+        // Toggle has-focus class based on whether any card is focused
+        if (focusedId !== null) {
+          container.classList.add('has-focus');
+        } else {
+          container.classList.remove('has-focus');
+        }
+
+        if (orderedIds.length === 0) {
+          container.innerHTML = '<div class="empty-state">No reminders due</div>';
+          return;
+        }
+
+        // Check if we can update in place (same cards, just focus change)
+        const existingWrappers = container.querySelectorAll('.focus-wrapper');
+        const existingIds = Array.from(existingWrappers).map(w => parseInt(w.dataset.id));
+        const canUpdateInPlace = !forceRecreate &&
+          existingIds.length === orderedIds.length &&
+          existingIds.every((id, i) => id === orderedIds[i]);
+
+        if (canUpdateInPlace) {
+          // Just update active states - no DOM recreation
+          existingWrappers.forEach(wrapper => {
+            const id = parseInt(wrapper.dataset.id);
+            if (focusedId === id) {
+              wrapper.classList.add('active');
+            } else {
+              wrapper.classList.remove('active');
+            }
+          });
+        } else {
+          // Full rebuild needed
+          container.innerHTML = '';
+          for (const id of orderedIds) {
+            const reminder = reminders.find(r => r.id === id);
+            if (reminder) {
+              container.appendChild(createCard(reminder, focusedId === id));
+            }
+          }
+        }
+      }
+
+      function updateReminders(newReminders) {
+        reminders = newReminders;
+
+        // Update ordered IDs - keep existing order, add new at end (FIFO)
+        const newIds = newReminders.map(r => r.id);
+        const existingOrdered = orderedIds.filter(id => newIds.includes(id));
+        const brandNew = newIds.filter(id => !orderedIds.includes(id));
+        const idsChanged = orderedIds.length !== existingOrdered.length || brandNew.length > 0;
+        orderedIds = [...existingOrdered, ...brandNew];
+
+        // Clear focus if focused reminder no longer exists
+        if (focusedId && !newIds.includes(focusedId)) {
+          focusedId = null;
+        }
+
+        render(idsChanged);  // Force recreate if reminders added/removed
+      }
+
+      // Filter to only due reminders
+      function filterDueReminders(allReminders) {
+        const now = new Date();
+        return allReminders.filter(r => {
+          if (r.is_completed) return false;
+          const dueTime = new Date(r.due_time);
+          return dueTime <= now;
+        });
+      }
+
+      // Fetch reminders directly from Rust backend
+      async function fetchReminders() {
+        try {
+          const allPending = await invoke("get_pending_reminders");
+          console.log("Fetched pending reminders:", allPending.length);
+          const dueReminders = filterDueReminders(allPending);
+          console.log("Due reminders:", dueReminders.length);
+          updateReminders(dueReminders);
+        } catch (e) {
+          console.error("Failed to fetch reminders:", e);
+        }
+      }
+
+      // Listen for updates from main window (for real-time updates after initial load)
+      listen("update-reminders", (event) => {
+        console.log("Received update-reminders:", event.payload);
+        updateReminders(event.payload.reminders);
+      });
+
+      // Listen for refresh signal (after complete/snooze actions)
+      listen("refresh-reminders", () => {
+        console.log("Received refresh signal, fetching reminders");
+        fetchReminders();
+      });
+
+      // Global mouse events for drag
+      document.addEventListener('mousemove', handleDragMove);
+      document.addEventListener('mouseup', handleDragEnd);
+
+      // Initial load: fetch reminders directly
+      render();
+      fetchReminders();
+    </script>
+  </body>
+</html>

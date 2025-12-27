@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reminder</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html, body {
+        background: transparent;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        overflow: hidden;
+        user-select: none;
+      }
+      body {
+        -webkit-app-region: drag;
+      }
+      .container {
+        background: rgba(24, 24, 27, 0.95);
+        border-radius: 12px;
+        border: 1px solid #3f3f46;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .accent-bar {
+        height: 3px;
+        background: #10b981;
+      }
+      .content {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        gap: 16px;
+      }
+      .info {
+        flex: 1;
+        min-width: 0;
+      }
+      .message {
+        color: #fafafa;
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .time {
+        color: #a1a1aa;
+        font-size: 12px;
+        margin-top: 2px;
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        -webkit-app-region: no-drag;
+      }
+      button {
+        border: none;
+        cursor: pointer;
+        font-family: inherit;
+        transition: all 0.15s;
+      }
+      .btn-snooze {
+        background: #27272a;
+        color: #a1a1aa;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .btn-snooze:hover {
+        background: #3f3f46;
+        color: #fafafa;
+      }
+      .btn-complete {
+        background: #10b981;
+        color: white;
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .btn-complete:hover {
+        background: #059669;
+      }
+      .btn-dismiss {
+        background: #27272a;
+        color: #71717a;
+        width: 36px;
+        height: 36px;
+        border-radius: 6px;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .btn-dismiss:hover {
+        background: #ef4444;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="accent-bar"></div>
+      <div class="content">
+        <div class="info">
+          <div class="message" id="message">Loading...</div>
+          <div class="time" id="time"></div>
+        </div>
+        <div class="actions">
+          <button class="btn-snooze" id="snooze5">+5m</button>
+          <button class="btn-snooze" id="snooze15">+15m</button>
+          <button class="btn-complete" id="complete">&#10003;</button>
+          <button class="btn-dismiss" id="dismiss">&#10005;</button>
+        </div>
+      </div>
+    </div>
+    <script type="module">
+      const { invoke } = window.__TAURI__.core;
+      const { getCurrentWindow } = window.__TAURI__.window;
+      const { WebviewWindow } = window.__TAURI__.webviewWindow;
+
+      // Parse URL parameters
+      const params = new URLSearchParams(window.location.search);
+      const reminderId = parseInt(params.get('id') || '0');
+      const message = decodeURIComponent(params.get('message') || '');
+      const dueTime = decodeURIComponent(params.get('due_time') || '');
+
+      // Display message
+      document.getElementById('message').textContent = message.length > 35
+        ? message.substring(0, 32) + '...'
+        : message;
+
+      // Display time
+      if (dueTime) {
+        const date = new Date(dueTime);
+        document.getElementById('time').textContent = date.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        });
+      }
+
+      // Play sound
+      try {
+        const audio = new Audio();
+        audio.src = "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JiYqGfXJqYV9ncHuEi4yIgHZsZGJkbXd/hoyMiIF2bGRlZ3B5gYaKiYR7cmljYmVldX6FiYmFfnNpYWJmbHR9hYmJhX5zaWJjZm10fYaJiYV+c2liY2VsdH2GiYmFfnNpYmNlbHR9homJhX5zaWJjZWx0fYaJiYV+c2liY2VsdH2GiYmFfnNpYmNlbA==";
+        audio.play().catch(() => {});
+      } catch (e) {}
+
+      // Request attention
+      const appWindow = getCurrentWindow();
+      appWindow.requestUserAttention(2);
+
+      async function closeNotification() {
+        await invoke('close_notification_window', { reminderId });
+      }
+
+      async function snooze(minutes) {
+        await invoke('snooze_reminder', { id: reminderId, minutes });
+        // Emit event to main window to refresh
+        const mainWindow = WebviewWindow.getByLabel('main');
+        if (mainWindow) {
+          mainWindow.emit('refresh-reminders');
+        }
+        await closeNotification();
+      }
+
+      async function complete() {
+        await invoke('complete_reminder', { id: reminderId });
+        // Emit event to main window to refresh
+        const mainWindow = WebviewWindow.getByLabel('main');
+        if (mainWindow) {
+          mainWindow.emit('refresh-reminders');
+        }
+        await closeNotification();
+      }
+
+      // Button handlers
+      document.getElementById('snooze5').addEventListener('click', () => snooze(5));
+      document.getElementById('snooze15').addEventListener('click', () => snooze(15));
+      document.getElementById('complete').addEventListener('click', complete);
+      document.getElementById('dismiss').addEventListener('click', closeNotification);
+    </script>
+  </body>
+</html>

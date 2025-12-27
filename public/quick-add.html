@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quick Add</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html, body {
+        background: transparent;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        overflow: hidden;
+        height: 100%;
+      }
+
+      @property --gradient-angle {
+        syntax: "<angle>";
+        initial-value: 0deg;
+        inherits: false;
+      }
+
+      @property --glow-opacity {
+        syntax: "<number>";
+        initial-value: 0.4;
+        inherits: false;
+      }
+
+      .container {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px;
+      }
+
+      .input-wrapper {
+        position: relative;
+        padding: 2px;
+        border-radius: 12px;
+        width: 100%;
+        background: conic-gradient(
+          from var(--gradient-angle),
+          #8b5cf6,
+          #6366f1,
+          #3b82f6,
+          #06b6d4,
+          #8b5cf6
+        );
+        animation: gradient-rotate 2s linear infinite, glow-pulse 2s ease-in-out infinite;
+        box-shadow:
+          0 0 20px rgba(139, 92, 246, var(--glow-opacity)),
+          0 0 40px rgba(99, 102, 241, calc(var(--glow-opacity) * 0.5));
+      }
+
+      @keyframes gradient-rotate {
+        to {
+          --gradient-angle: 360deg;
+        }
+      }
+
+      @keyframes glow-pulse {
+        0%, 100% {
+          --glow-opacity: 0.3;
+        }
+        50% {
+          --glow-opacity: 0.6;
+        }
+      }
+
+      .input-box {
+        background: #1a1a1a;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      input {
+        width: 100%;
+        background: transparent;
+        border: none;
+        padding: 12px 16px;
+        color: #fafafa;
+        font-size: 14px;
+        outline: none;
+      }
+
+      input::placeholder {
+        color: #71717a;
+      }
+
+      input:disabled {
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="input-wrapper">
+        <div class="input-box">
+          <input
+            type="text"
+            id="input"
+            placeholder="e.g., call mom in 2 hours"
+            autofocus
+          />
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      // Wait for Tauri to be ready - this is critical on Windows
+      async function waitForTauri() {
+        return new Promise((resolve) => {
+          if (window.__TAURI__) {
+            resolve();
+          } else {
+            // Poll until Tauri is available
+            const interval = setInterval(() => {
+              if (window.__TAURI__) {
+                clearInterval(interval);
+                resolve();
+              }
+            }, 10);
+          }
+        });
+      }
+
+      async function init() {
+        await waitForTauri();
+
+        const { invoke } = window.__TAURI__.core;
+        const { getCurrentWindow } = window.__TAURI__.window;
+
+        const input = document.getElementById('input');
+        const win = getCurrentWindow();
+        let isBusy = false;
+
+        console.log('Quick add initialized, window:', win.label);
+
+        // Focus input after a small delay to ensure window is ready
+        setTimeout(() => {
+          input.focus();
+        }, 50);
+
+        // Parse natural time from text
+        function parseNaturalTime(text) {
+          const lowerText = text.toLowerCase().trim();
+
+          // Pattern: "message in X minutes/hours/days"
+          const inPattern = /(.+?)\s+in\s+(\d+)\s*(min(?:ute)?s?|hours?|days?|h|m|d)/i;
+          const inMatch = lowerText.match(inPattern);
+
+          if (inMatch) {
+            const message = inMatch[1].trim();
+            const amount = parseInt(inMatch[2]);
+            const unit = inMatch[3].toLowerCase();
+            const now = new Date();
+            let ms = 0;
+
+            if (unit.startsWith('m')) ms = amount * 60 * 1000;
+            else if (unit.startsWith('h')) ms = amount * 60 * 60 * 1000;
+            else if (unit.startsWith('d')) ms = amount * 24 * 60 * 60 * 1000;
+
+            return {
+              message: message.charAt(0).toUpperCase() + message.slice(1),
+              dueTime: new Date(now.getTime() + ms)
+            };
+          }
+
+          // Pattern: "message at HH:MM am/pm"
+          const atPattern = /(.+?)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+          const atMatch = lowerText.match(atPattern);
+
+          if (atMatch) {
+            const message = atMatch[1].trim();
+            let hours = parseInt(atMatch[2]);
+            const minutes = atMatch[3] ? parseInt(atMatch[3]) : 0;
+            const meridiem = atMatch[4]?.toLowerCase();
+
+            if (meridiem === 'pm' && hours < 12) hours += 12;
+            if (meridiem === 'am' && hours === 12) hours = 0;
+
+            const now = new Date();
+            const dueTime = new Date(now);
+            dueTime.setHours(hours, minutes, 0, 0);
+
+            if (dueTime <= now) {
+              dueTime.setDate(dueTime.getDate() + 1);
+            }
+
+            return {
+              message: message.charAt(0).toUpperCase() + message.slice(1),
+              dueTime
+            };
+          }
+
+          // Pattern: "message tomorrow"
+          const tomorrowPattern = /(.+?)\s+tomorrow/i;
+          const tomorrowMatch = lowerText.match(tomorrowPattern);
+
+          if (tomorrowMatch) {
+            const message = tomorrowMatch[1].trim();
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(9, 0, 0, 0);
+
+            return {
+              message: message.charAt(0).toUpperCase() + message.slice(1),
+              dueTime: tomorrow
+            };
+          }
+
+          return null;
+        }
+
+        // Close window using destroy() to force close without events
+        async function closeWindow() {
+          if (isBusy) return;
+          isBusy = true;
+          console.log('Destroying window...');
+          try {
+            await win.destroy();
+          } catch (e) {
+            console.error('Failed to destroy window:', e);
+            // Fallback to close
+            try {
+              await win.close();
+            } catch (e2) {
+              console.error('Failed to close window:', e2);
+            }
+          }
+        }
+
+        // Submit reminder
+        async function handleSubmit() {
+          const text = input.value.trim();
+          console.log('Submit:', text);
+
+          if (!text || isBusy) return;
+
+          isBusy = true;
+          input.disabled = true;
+
+          const parsed = parseNaturalTime(text);
+          console.log('Parsed:', parsed);
+
+          // Determine message and due time
+          let message, dueTime;
+
+          if (parsed) {
+            message = parsed.message;
+            dueTime = parsed.dueTime;
+          } else {
+            // Default: 5 minutes from now with full text as message
+            message = text.charAt(0).toUpperCase() + text.slice(1);
+            dueTime = new Date(Date.now() + 5 * 60 * 1000);
+            console.log('No time pattern found, defaulting to 5 minutes');
+          }
+
+          try {
+            await invoke("add_reminder", {
+              message: message,
+              dueTime: dueTime.toISOString(),
+              recurrence: ""
+            });
+            console.log('Reminder added successfully');
+          } catch (e) {
+            console.error("Failed to add reminder:", e);
+          }
+
+          // Always close after submit attempt
+          console.log('Closing after submit...');
+          try {
+            await win.destroy();
+          } catch (e) {
+            console.error('Failed to destroy after submit:', e);
+          }
+        }
+
+        // Keyboard event handler
+        function handleKeyDown(e) {
+          console.log('Key pressed:', e.key);
+
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeWindow();
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            handleSubmit();
+          }
+        }
+
+        // Blur handler - close if not busy
+        function handleBlur() {
+          console.log('Window blur');
+          if (!isBusy) {
+            closeWindow();
+          }
+        }
+
+        // Attach event listeners
+        document.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('blur', handleBlur);
+      }
+
+      // Start initialization
+      init().catch(e => console.error('Init failed:', e));
+    </script>
+  </body>
+</html>
