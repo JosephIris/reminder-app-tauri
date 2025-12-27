@@ -2,9 +2,14 @@ use crate::reminder::Reminder;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read as IoRead, Write as IoWrite};
+use std::net::TcpListener;
 use std::path::PathBuf;
 
-const FOLDER_ID: &str = "1oGm0zY87yCDRIYAcoWCWXbGEiy3vY8kf";
+const FOLDER_ID: &str = "1F0qYeAVU_7H73kX9uz-1ZF3i2KS_V-mk";
+const OAUTH_REDIRECT_PORT: u16 = 8085;
+// Use drive scope to access all files, not just app-created ones
+const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/drive";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ReminderStore {
@@ -26,6 +31,18 @@ struct TokenFile {
 #[derive(Debug, Deserialize)]
 struct RefreshResponse {
     access_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthTokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthCredentials {
+    pub client_id: String,
+    pub client_secret: String,
 }
 
 pub struct Storage {
@@ -116,27 +133,20 @@ impl Storage {
         let client_id = self.client_id.as_ref().ok_or("No client ID")?;
         let client_secret = self.client_secret.as_ref().ok_or("No client secret")?;
 
-        let client = reqwest::blocking::Client::new();
-        let params = [
-            ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
-            ("refresh_token", refresh_token.as_str()),
-            ("grant_type", "refresh_token"),
-        ];
+        let form_body = format!(
+            "client_id={}&client_secret={}&refresh_token={}&grant_type=refresh_token",
+            urlencoding::encode(client_id),
+            urlencoding::encode(client_secret),
+            urlencoding::encode(refresh_token)
+        );
 
-        let response = client
-            .post("https://oauth2.googleapis.com/token")
-            .form(&params)
-            .send()
+        let response = ureq::post("https://oauth2.googleapis.com/token")
+            .set("Content-Type", "application/x-www-form-urlencoded")
+            .send_string(&form_body)
             .map_err(|e| format!("Token refresh request failed: {}", e))?;
 
-        if !response.status().is_success() {
-            let error_text = response.text().unwrap_or_default();
-            return Err(format!("Token refresh failed: {}", error_text));
-        }
-
         let refresh_response: RefreshResponse = response
-            .json()
+            .into_json()
             .map_err(|e| format!("Failed to parse refresh response: {}", e))?;
 
         self.access_token = Some(refresh_response.access_token.clone());
@@ -168,8 +178,7 @@ impl Storage {
     fn find_or_create_drive_file(&mut self) -> Result<(), String> {
         let token = self.access_token.as_ref().ok_or("No access token")?;
 
-        // Search for existing file
-        let client = reqwest::blocking::Client::new();
+        // Search for existing file in the specific folder
         let query = format!(
             "name='reminders.json' and '{}' in parents and trashed=false",
             FOLDER_ID
@@ -179,21 +188,20 @@ impl Storage {
             urlencoding::encode(&query)
         );
 
-        let response = client
-            .get(&url)
-            .bearer_auth(token)
-            .send()
-            .map_err(|e| e.to_string())?;
+        eprintln!("Searching for reminders.json in folder {}...", FOLDER_ID);
 
-        // Check for auth errors
-        if response.status() == 401 {
-            return Err("Token expired".to_string());
-        }
-        if !response.status().is_success() {
-            return Err(format!("Drive API error: {}", response.status()));
-        }
+        let response = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {}", token))
+            .call();
 
-        let json: serde_json::Value = response.json().map_err(|e| e.to_string())?;
+        let response = match response {
+            Ok(r) => r,
+            Err(ureq::Error::Status(401, _)) => return Err("Token expired".to_string()),
+            Err(ureq::Error::Status(code, _)) => return Err(format!("Drive API error: {}", code)),
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let json: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
 
         if let Some(files) = json["files"].as_array() {
             if let Some(file) = files.first() {
@@ -208,7 +216,6 @@ impl Storage {
 
     fn create_drive_file(&mut self) -> Result<(), String> {
         let token = self.access_token.as_ref().ok_or("No access token")?;
-        let client = reqwest::blocking::Client::new();
 
         let metadata = serde_json::json!({
             "name": "reminders.json",
@@ -229,25 +236,19 @@ impl Storage {
             boundary
         );
 
-        let response = client
-            .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id")
-            .bearer_auth(token)
-            .header(
-                "Content-Type",
-                format!("multipart/related; boundary={}", boundary),
-            )
-            .body(body)
-            .send()
-            .map_err(|e| e.to_string())?;
+        let response = ureq::post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id")
+            .set("Authorization", &format!("Bearer {}", token))
+            .set("Content-Type", &format!("multipart/related; boundary={}", boundary))
+            .send_string(&body);
 
-        if response.status() == 401 {
-            return Err("Token expired".to_string());
-        }
-        if !response.status().is_success() {
-            return Err(format!("Drive API error: {}", response.status()));
-        }
+        let response = match response {
+            Ok(r) => r,
+            Err(ureq::Error::Status(401, _)) => return Err("Token expired".to_string()),
+            Err(ureq::Error::Status(code, _)) => return Err(format!("Drive API error: {}", code)),
+            Err(e) => return Err(e.to_string()),
+        };
 
-        let json: serde_json::Value = response.json().map_err(|e| e.to_string())?;
+        let json: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
         self.file_id = json["id"].as_str().map(String::from);
 
         Ok(())
@@ -257,27 +258,36 @@ impl Storage {
         let token = self.access_token.as_ref().ok_or("No access token")?;
         let file_id = self.file_id.as_ref().ok_or("No file ID")?;
 
-        let client = reqwest::blocking::Client::new();
         let url = format!(
             "https://www.googleapis.com/drive/v3/files/{}?alt=media",
             file_id
         );
 
-        let response = client
-            .get(&url)
-            .bearer_auth(token)
-            .send()
-            .map_err(|e| e.to_string())?;
+        let response = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {}", token))
+            .call();
 
-        if response.status() == 401 {
-            return Err("Token expired".to_string());
-        }
-        if !response.status().is_success() {
-            return Err(format!("Drive API error: {}", response.status()));
-        }
+        let response = match response {
+            Ok(r) => r,
+            Err(ureq::Error::Status(401, _)) => return Err("Token expired".to_string()),
+            Err(ureq::Error::Status(code, _)) => return Err(format!("Drive API error: {}", code)),
+            Err(e) => return Err(e.to_string()),
+        };
 
-        let content = response.text().map_err(|e| e.to_string())?;
-        self.data = serde_json::from_str(&content).unwrap_or_default();
+        let content = response.into_string().map_err(|e| e.to_string())?;
+        eprintln!("Drive content received: {} bytes", content.len());
+
+        match serde_json::from_str::<ReminderStore>(&content) {
+            Ok(data) => {
+                eprintln!("Parsed {} pending, {} completed reminders from Drive",
+                    data.pending.len(), data.completed.len());
+                self.data = data;
+            }
+            Err(e) => {
+                eprintln!("Failed to parse Drive content: {}. Content: {}", e, &content[..content.len().min(500)]);
+                self.data = ReminderStore::default();
+            }
+        }
 
         Ok(())
     }
@@ -286,7 +296,6 @@ impl Storage {
         let token = self.access_token.as_ref().ok_or("No access token")?.clone();
         let file_id = self.file_id.as_ref().ok_or("No file ID")?.clone();
 
-        let client = reqwest::blocking::Client::new();
         let url = format!(
             "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=media",
             file_id
@@ -294,35 +303,29 @@ impl Storage {
 
         let content = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string())?;
 
-        let response = client
-            .patch(&url)
-            .bearer_auth(&token)
-            .header("Content-Type", "application/json")
-            .body(content)
-            .send()
-            .map_err(|e| e.to_string())?;
+        let response = ureq::request("PATCH", &url)
+            .set("Authorization", &format!("Bearer {}", token))
+            .set("Content-Type", "application/json")
+            .send_string(&content);
 
-        if response.status() == 401 {
-            // Token expired, try to refresh and retry
-            self.refresh_access_token()?;
-            let new_token = self.access_token.as_ref().ok_or("No access token after refresh")?;
-            let content = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string())?;
-            let retry_response = client
-                .patch(&url)
-                .bearer_auth(new_token)
-                .header("Content-Type", "application/json")
-                .body(content)
-                .send()
-                .map_err(|e| e.to_string())?;
+        match response {
+            Ok(_) => Ok(()),
+            Err(ureq::Error::Status(401, _)) => {
+                // Token expired, try to refresh and retry
+                self.refresh_access_token()?;
+                let new_token = self.access_token.as_ref().ok_or("No access token after refresh")?;
+                let content = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string())?;
 
-            if !retry_response.status().is_success() {
-                return Err(format!("Drive API error after refresh: {}", retry_response.status()));
+                ureq::request("PATCH", &url)
+                    .set("Authorization", &format!("Bearer {}", new_token))
+                    .set("Content-Type", "application/json")
+                    .send_string(&content)
+                    .map_err(|e| format!("Drive API error after refresh: {}", e))?;
+                Ok(())
             }
-        } else if !response.status().is_success() {
-            return Err(format!("Drive API error: {}", response.status()));
+            Err(ureq::Error::Status(code, _)) => Err(format!("Drive API error: {}", code)),
+            Err(e) => Err(e.to_string()),
         }
-
-        Ok(())
     }
 
     fn load_local(&mut self) -> Result<(), String> {
@@ -437,6 +440,17 @@ impl Storage {
         Ok(())
     }
 
+    pub fn uncomplete_reminder(&mut self, id: i64) -> Result<(), String> {
+        if let Some(pos) = self.data.completed.iter().position(|r| r.id == id) {
+            let mut reminder = self.data.completed.remove(pos);
+            reminder.is_completed = false;
+            reminder.completed_at = None;
+            self.data.pending.push(reminder);
+            self.save()?;
+        }
+        Ok(())
+    }
+
     pub fn refresh_from_cloud(&mut self) -> Result<bool, String> {
         if !self.use_drive {
             return Ok(false);
@@ -467,6 +481,318 @@ impl Storage {
         }
         Ok(())
     }
+
+    /// Check if OAuth credentials are configured
+    pub fn has_oauth_credentials(&self) -> bool {
+        let creds_path = self.app_data_path.join("oauth_credentials.json");
+        let exists = creds_path.exists();
+        eprintln!("has_oauth_credentials: path={:?}, exists={}", creds_path, exists);
+        exists
+    }
+
+    /// Check if we have valid tokens (user is logged in)
+    pub fn is_logged_in(&self) -> bool {
+        let result = self.use_drive && self.access_token.is_some();
+        eprintln!("is_logged_in: use_drive={}, has_token={}, result={}",
+            self.use_drive, self.access_token.is_some(), result);
+        result
+    }
+
+    /// Get the OAuth status
+    pub fn get_oauth_status(&self) -> (bool, bool) {
+        (self.has_oauth_credentials(), self.is_logged_in())
+    }
+
+    /// Save OAuth credentials (client_id and client_secret from GCP)
+    pub fn save_oauth_credentials(&self, credentials: &OAuthCredentials) -> Result<(), String> {
+        let creds_path = self.app_data_path.join("oauth_credentials.json");
+        let content = serde_json::to_string_pretty(credentials).map_err(|e| e.to_string())?;
+        fs::write(&creds_path, content).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Load OAuth credentials
+    fn load_oauth_credentials(&self) -> Result<OAuthCredentials, String> {
+        let creds_path = self.app_data_path.join("oauth_credentials.json");
+        let content = fs::read_to_string(&creds_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())
+    }
+
+    /// Get OAuth credentials (public accessor)
+    pub fn get_oauth_credentials(&self) -> Option<OAuthCredentials> {
+        self.load_oauth_credentials().ok()
+    }
+
+    /// Get the app data path
+    pub fn get_app_data_path(&self) -> &std::path::Path {
+        &self.app_data_path
+    }
+
+    /// Reload OAuth state from disk (after external OAuth completion)
+    pub fn reload_oauth_state(&mut self) -> Result<(), String> {
+        self.init_drive()
+    }
+
+    /// Get the OAuth authorization URL to open in browser
+    pub fn get_oauth_url(&self) -> Result<String, String> {
+        let creds = self.load_oauth_credentials()?;
+        let redirect_uri = format!("http://localhost:{}", OAUTH_REDIRECT_PORT);
+
+        let url = format!(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
+            urlencoding::encode(&creds.client_id),
+            urlencoding::encode(&redirect_uri),
+            urlencoding::encode(OAUTH_SCOPES)
+        );
+
+        Ok(url)
+    }
+
+    /// Start local server to receive OAuth callback and return the auth code
+    pub fn wait_for_oauth_callback(&self) -> Result<String, String> {
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", OAUTH_REDIRECT_PORT))
+            .map_err(|e| format!("Failed to start callback server: {}", e))?;
+
+        eprintln!("Waiting for OAuth callback on port {}...", OAUTH_REDIRECT_PORT);
+
+        // Accept one connection
+        let (mut stream, _) = listener
+            .accept()
+            .map_err(|e| format!("Failed to accept connection: {}", e))?;
+
+        let mut buffer = [0; 4096];
+        let n = stream.read(&mut buffer).map_err(|e| e.to_string())?;
+        let request = String::from_utf8_lossy(&buffer[..n]);
+
+        // Parse the code from the request
+        // GET /?code=AUTH_CODE&scope=... HTTP/1.1
+        let code = request
+            .lines()
+            .next()
+            .and_then(|line| {
+                line.split_whitespace()
+                    .nth(1)
+                    .and_then(|path| {
+                        path.split('?')
+                            .nth(1)
+                            .and_then(|query| {
+                                query.split('&').find_map(|param| {
+                                    let mut parts = param.split('=');
+                                    if parts.next() == Some("code") {
+                                        parts.next().map(String::from)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                    })
+            })
+            .ok_or("Failed to parse auth code from callback")?;
+
+        // Send success response
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><h1>Success!</h1><p>You can close this window and return to the app.</p><script>window.close();</script></body></html>";
+        stream.write_all(response.as_bytes()).ok();
+
+        eprintln!("Received OAuth code");
+        Ok(code)
+    }
+
+    /// Exchange auth code for tokens
+    pub fn exchange_oauth_code(&mut self, code: &str) -> Result<(), String> {
+        let creds = self.load_oauth_credentials()?;
+        let redirect_uri = format!("http://localhost:{}", OAUTH_REDIRECT_PORT);
+
+        let form_body = format!(
+            "client_id={}&client_secret={}&code={}&grant_type=authorization_code&redirect_uri={}",
+            urlencoding::encode(&creds.client_id),
+            urlencoding::encode(&creds.client_secret),
+            urlencoding::encode(code),
+            urlencoding::encode(&redirect_uri)
+        );
+
+        let response = ureq::post("https://oauth2.googleapis.com/token")
+            .set("Content-Type", "application/x-www-form-urlencoded")
+            .send_string(&form_body)
+            .map_err(|e| format!("Token exchange failed: {}", e))?;
+
+        let token_response: OAuthTokenResponse = response
+            .into_json()
+            .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+        // Save tokens
+        self.access_token = Some(token_response.access_token.clone());
+        self.refresh_token = token_response.refresh_token.clone();
+        self.client_id = Some(creds.client_id.clone());
+        self.client_secret = Some(creds.client_secret.clone());
+
+        // Save to token.json for persistence
+        let token_data = serde_json::json!({
+            "token": token_response.access_token,
+            "refresh_token": token_response.refresh_token,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+        });
+
+        let token_path = self.app_data_path.join("token.json");
+        let content = serde_json::to_string_pretty(&token_data).map_err(|e| e.to_string())?;
+        fs::write(&token_path, content).map_err(|e| e.to_string())?;
+
+        // Now initialize Drive
+        self.use_drive = true;
+        self.find_or_create_drive_file()?;
+        self.load_from_drive()?;
+
+        eprintln!("OAuth completed successfully. Drive sync enabled.");
+        Ok(())
+    }
+
+    /// Disconnect from Google Drive (logout)
+    pub fn disconnect_drive(&mut self) -> Result<(), String> {
+        // Remove token file
+        let token_path = self.app_data_path.join("token.json");
+        if token_path.exists() {
+            fs::remove_file(&token_path).map_err(|e| e.to_string())?;
+        }
+
+        // Clear state
+        self.use_drive = false;
+        self.access_token = None;
+        self.refresh_token = None;
+        self.file_id = None;
+
+        eprintln!("Disconnected from Google Drive");
+        Ok(())
+    }
+}
+
+/// Standalone function to wait for OAuth callback (can be called from spawn_blocking)
+pub fn wait_for_oauth_callback_standalone() -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+
+    // Try to bind with retries (handles TIME_WAIT from previous connections)
+    let listener = {
+        let addr = format!("127.0.0.1:{}", OAUTH_REDIRECT_PORT);
+        let mut attempts = 0;
+        loop {
+            match TcpListener::bind(&addr) {
+                Ok(l) => break l,
+                Err(_) if attempts < 5 => {
+                    eprintln!("Port {} busy, retrying in 1s... (attempt {})", OAUTH_REDIRECT_PORT, attempts + 1);
+                    std::thread::sleep(Duration::from_secs(1));
+                    attempts += 1;
+                }
+                Err(e) => return Err(format!("Failed to start callback server after {} attempts: {}", attempts, e)),
+            }
+        }
+    };
+
+    eprintln!("Waiting for OAuth callback on port {}...", OAUTH_REDIRECT_PORT);
+
+    // Keep accepting connections until we get one with the OAuth code
+    // (browser may send favicon.ico or other requests first)
+    loop {
+        let (mut stream, _) = listener
+            .accept()
+            .map_err(|e| format!("Failed to accept connection: {}", e))?;
+
+        let mut buffer = [0; 4096];
+        let n = stream.read(&mut buffer).map_err(|e| e.to_string())?;
+        let request = String::from_utf8_lossy(&buffer[..n]);
+
+        eprintln!("Received request: {}", request.lines().next().unwrap_or(""));
+
+        // Parse the code from the request
+        // GET /?code=AUTH_CODE&scope=... HTTP/1.1
+        let code = request
+            .lines()
+            .next()
+            .and_then(|line| {
+                line.split_whitespace()
+                    .nth(1)
+                    .and_then(|path| {
+                        // Only process requests to the root path with query params
+                        if !path.starts_with("/?") {
+                            return None;
+                        }
+                        path.split('?')
+                            .nth(1)
+                            .and_then(|query| {
+                                query.split('&').find_map(|param| {
+                                    let mut parts = param.split('=');
+                                    if parts.next() == Some("code") {
+                                        parts.next().map(String::from)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                    })
+            });
+
+        if let Some(code) = code {
+            // Send success response
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<html><body><h1>Success!</h1><p>You can close this window and return to the app.</p><script>window.close();</script></body></html>";
+            stream.write_all(response.as_bytes()).ok();
+            eprintln!("Received OAuth code");
+            return Ok(code);
+        } else {
+            // Send 404 for other requests (favicon.ico, etc.)
+            let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+            stream.write_all(response.as_bytes()).ok();
+        }
+    }
+}
+
+/// Complete the entire OAuth flow in a blocking context (for use in a separate thread)
+/// This does: wait for callback -> exchange code for tokens -> save tokens
+pub fn complete_oauth_flow_blocking(app_data_path: &std::path::Path) -> Result<(), String> {
+    // Wait for the OAuth callback
+    let code = wait_for_oauth_callback_standalone()?;
+    eprintln!("Got OAuth code, exchanging for tokens...");
+
+    // Load credentials
+    let creds_path = app_data_path.join("oauth_credentials.json");
+    let creds_content = fs::read_to_string(&creds_path)
+        .map_err(|e| format!("Failed to read credentials: {}", e))?;
+    let creds: OAuthCredentials = serde_json::from_str(&creds_content)
+        .map_err(|e| format!("Failed to parse credentials: {}", e))?;
+
+    // Exchange code for tokens
+    let redirect_uri = format!("http://localhost:{}", OAUTH_REDIRECT_PORT);
+    let form_body = format!(
+        "client_id={}&client_secret={}&code={}&grant_type=authorization_code&redirect_uri={}",
+        urlencoding::encode(&creds.client_id),
+        urlencoding::encode(&creds.client_secret),
+        urlencoding::encode(&code),
+        urlencoding::encode(&redirect_uri)
+    );
+
+    let response = ureq::post("https://oauth2.googleapis.com/token")
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&form_body)
+        .map_err(|e| format!("Token exchange failed: {}", e))?;
+
+    let token_response: OAuthTokenResponse = response
+        .into_json()
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    // Save tokens to token.json
+    let token_data = serde_json::json!({
+        "token": token_response.access_token,
+        "refresh_token": token_response.refresh_token,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+    });
+
+    let token_path = app_data_path.join("token.json");
+    let content = serde_json::to_string_pretty(&token_data)
+        .map_err(|e| format!("Failed to serialize token: {}", e))?;
+    fs::write(&token_path, content)
+        .map_err(|e| format!("Failed to write token: {}", e))?;
+
+    eprintln!("Token saved successfully");
+    Ok(())
 }
 
 mod urlencoding {

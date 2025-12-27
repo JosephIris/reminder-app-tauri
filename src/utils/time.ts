@@ -80,6 +80,21 @@ export function parseNaturalTime(text: string): { message: string; dueTime: Date
 }
 
 /**
+ * Get urgency level based on time remaining.
+ * Returns: "overdue" | "urgent" | "soon" | "normal"
+ */
+export function getUrgencyLevel(date: Date): "overdue" | "urgent" | "soon" | "normal" {
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  const diffMins = diffMs / 60000;
+
+  if (diffMins <= 0) return "overdue";
+  if (diffMins <= 15) return "urgent";  // < 15 minutes
+  if (diffMins <= 60) return "soon";    // < 1 hour
+  return "normal";
+}
+
+/**
  * Format a date for display relative to now.
  */
 export function formatRelativeTime(date: Date): string {
@@ -107,6 +122,20 @@ export function formatRelativeTime(date: Date): string {
   }
 
   return parts.join(" ");
+}
+
+/**
+ * Format time with both relative and absolute.
+ * Example: "2h 30m (3:45 PM)"
+ */
+export function formatTimeWithAbsolute(date: Date): { relative: string; absolute: string } {
+  const relative = formatRelativeTime(date);
+  const absolute = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return { relative, absolute };
 }
 
 /**

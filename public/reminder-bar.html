@@ -16,6 +16,9 @@
         overflow: visible;
         user-select: none;
         height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
       }
 
       @property --gradient-angle {
@@ -25,10 +28,13 @@
       }
 
       .bar-container {
-        height: 100%;
+        height: calc(100% - 8px);
+        width: calc(100% - 32px);
+        margin: 4px 16px;
         background: rgba(13, 13, 13, 0.95);
         backdrop-filter: blur(10px);
-        border-top: 1px solid #333;
+        border: 1px solid #333;
+        border-radius: 12px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -362,6 +368,7 @@
       let reminders = [];
       let orderedIds = [];
       let focusedId = null;
+      let ignoreNextFocusEvent = false;  // Flag to ignore our own focus events
       let draggedId = null;
       let dragStartX = 0;
       let dragOffsetX = 0;
@@ -442,15 +449,19 @@
         await emit("refresh-reminders");
       }
 
-      function handleDismiss(id) {
-        orderedIds = orderedIds.filter(i => i !== id);
-        reminders = reminders.filter(r => r.id !== id);
-        render();
+      async function handleDismiss(id) {
+        // Delete from storage
+        await invoke("delete_reminder", { id });
+        await emit("refresh-reminders");
       }
 
-      function handleFocus(id) {
+      async function handleFocus(id) {
         focusedId = focusedId === id ? null : id;
         render();
+        // Mark that we're emitting, so we ignore our own event
+        ignoreNextFocusEvent = true;
+        // Emit focus event to main window
+        await emit("focus-reminder", { id: focusedId });
       }
 
       function handleDragStart(e, id) {
@@ -768,6 +779,19 @@
         fetchReminders();
       });
 
+      // Listen for focus events from main window
+      listen("focus-reminder", (event) => {
+        if (ignoreNextFocusEvent) {
+          ignoreNextFocusEvent = false;
+          return;
+        }
+        const newFocusId = event.payload.id;
+        if (focusedId !== newFocusId) {
+          focusedId = newFocusId;
+          render();
+        }
+      });
+
       // Global mouse events for drag
       document.addEventListener('mousemove', handleDragMove);
       document.addEventListener('mouseup', handleDragEnd);
@@ -775,6 +799,9 @@
       // Initial load: fetch reminders directly
       render();
       fetchReminders();
+
+      // Poll every second to catch newly due reminders in real-time
+      setInterval(fetchReminders, 1000);
     </script>
   </body>
 </html>

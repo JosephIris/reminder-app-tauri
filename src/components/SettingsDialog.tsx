@@ -88,9 +88,78 @@ export function SettingsDialog({ onClose, onRefreshFromCloud }: SettingsDialogPr
   const [quickAddShortcut, setQuickAddShortcut] = useState("Ctrl+Alt+R");
   const [showListShortcut, setShowListShortcut] = useState("Ctrl+Alt+L");
 
+  // OAuth state
+  const [hasCredentials, setHasCredentials] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showCredentialsForm, setShowCredentialsForm] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
   const registerShortcuts = useCallback((quickAdd: string, showList: string) => {
     invoke("register_shortcuts", { quickAdd, showList }).catch(console.error);
   }, []);
+
+  // Load OAuth status
+  useEffect(() => {
+    invoke<[boolean, boolean]>("get_oauth_status")
+      .then(([hasCreds, loggedIn]) => {
+        setHasCredentials(hasCreds);
+        setIsLoggedIn(loggedIn);
+      })
+      .catch(console.error);
+  }, []);
+
+  const handleSaveCredentials = async () => {
+    if (!clientId.trim() || !clientSecret.trim()) return;
+
+    setOauthLoading(true);
+    setOauthError(null);
+    try {
+      await invoke("save_oauth_credentials", {
+        clientId: clientId.trim(),
+        clientSecret: clientSecret.trim(),
+      });
+      setHasCredentials(true);
+      setShowCredentialsForm(false);
+      setClientId("");
+      setClientSecret("");
+    } catch (e) {
+      setOauthError(String(e));
+    } finally {
+      setOauthLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
+    setOauthLoading(true);
+    setOauthError(null);
+    try {
+      await invoke("start_oauth_flow");
+      setIsLoggedIn(true);
+      // Refresh reminders from cloud after successful login
+      if (onRefreshFromCloud) {
+        await onRefreshFromCloud();
+      }
+    } catch (e) {
+      setOauthError(String(e));
+    } finally {
+      setOauthLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setOauthLoading(true);
+    try {
+      await invoke("disconnect_drive");
+      setIsLoggedIn(false);
+    } catch (e) {
+      setOauthError(String(e));
+    } finally {
+      setOauthLoading(false);
+    }
+  };
 
   useEffect(() => {
     isEnabled().then((enabled) => {
@@ -213,38 +282,139 @@ export function SettingsDialog({ onClose, onRefreshFromCloud }: SettingsDialogPr
             </div>
           </div>
 
-          {/* Cloud Sync */}
+          {/* Google Drive Sync */}
           <div className="pt-4 border-t border-dark-600">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-white">Cloud Sync</p>
-                <p className="text-xs text-gray-400">Refresh reminders from Google Drive</p>
-              </div>
-              <button
-                onClick={async () => {
-                  if (onRefreshFromCloud) {
-                    setSyncing(true);
-                    setSyncStatus(null);
-                    try {
-                      const synced = await onRefreshFromCloud();
-                      setSyncStatus(synced ? "Synced!" : "Local only");
-                    } catch (e) {
-                      setSyncStatus("Failed");
-                    } finally {
-                      setSyncing(false);
-                    }
-                  }
-                }}
-                disabled={syncing || !onRefreshFromCloud}
-                className="px-3 py-1.5 bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors"
-              >
-                {syncing ? "Syncing..." : "Sync Now"}
-              </button>
+            <p className="text-sm text-gray-400 mb-3">Google Drive Sync</p>
+
+            {/* Status indicator */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className={`w-2 h-2 rounded-full ${isLoggedIn ? "bg-green-500" : "bg-gray-500"}`} />
+              <span className="text-sm text-gray-300">
+                {isLoggedIn ? "Connected to Google Drive" : hasCredentials ? "Not logged in" : "Not configured"}
+              </span>
             </div>
+
+            {/* Credentials form */}
+            {showCredentialsForm && (
+              <div className="space-y-2 mb-3 p-3 bg-dark-700 rounded-lg">
+                <p className="text-xs text-gray-400 mb-2">
+                  Enter your GCP OAuth credentials:
+                </p>
+                <input
+                  type="text"
+                  placeholder="Client ID"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  className="w-full px-3 py-2 bg-dark-600 border border-dark-500 rounded text-white text-sm
+                             focus:outline-none focus:border-accent-blue"
+                />
+                <input
+                  type="password"
+                  placeholder="Client Secret"
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  className="w-full px-3 py-2 bg-dark-600 border border-dark-500 rounded text-white text-sm
+                             focus:outline-none focus:border-accent-blue"
+                />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={handleSaveCredentials}
+                    disabled={oauthLoading || !clientId.trim() || !clientSecret.trim()}
+                    className="px-3 py-1.5 bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 text-white text-sm rounded transition-colors"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setShowCredentialsForm(false)}
+                    className="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 text-white text-sm rounded transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2">
+              {!hasCredentials && !showCredentialsForm && (
+                <button
+                  onClick={() => setShowCredentialsForm(true)}
+                  className="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 text-white text-sm rounded-lg transition-colors"
+                >
+                  Setup Credentials
+                </button>
+              )}
+
+              {hasCredentials && !isLoggedIn && (
+                <button
+                  onClick={handleLogin}
+                  disabled={oauthLoading}
+                  className="px-3 py-1.5 bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 text-white text-sm rounded-lg transition-colors"
+                >
+                  {oauthLoading ? "Connecting..." : "Connect to Google"}
+                </button>
+              )}
+
+              {isLoggedIn && (
+                <>
+                  <button
+                    onClick={async () => {
+                      if (onRefreshFromCloud) {
+                        setSyncing(true);
+                        setSyncStatus(null);
+                        try {
+                          const synced = await onRefreshFromCloud();
+                          setSyncStatus(synced ? "Synced!" : "Failed");
+                        } catch (e) {
+                          setSyncStatus("Failed");
+                        } finally {
+                          setSyncing(false);
+                        }
+                      }
+                    }}
+                    disabled={syncing}
+                    className="px-3 py-1.5 bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 text-white text-sm rounded-lg transition-colors"
+                  >
+                    {syncing ? "Syncing..." : "Sync Now"}
+                  </button>
+                  <button
+                    onClick={handleDisconnect}
+                    disabled={oauthLoading}
+                    className="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 text-red-400 text-sm rounded-lg transition-colors"
+                  >
+                    Disconnect
+                  </button>
+                </>
+              )}
+
+              {hasCredentials && !showCredentialsForm && (
+                <button
+                  onClick={async () => {
+                    // Load existing credentials when editing
+                    try {
+                      const [existingClientId, existingClientSecret] = await invoke<[string, string]>("get_oauth_credentials");
+                      setClientId(existingClientId);
+                      setClientSecret(existingClientSecret);
+                    } catch (e) {
+                      // Ignore if credentials can't be loaded
+                    }
+                    setShowCredentialsForm(true);
+                  }}
+                  className="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 text-gray-400 text-sm rounded-lg transition-colors"
+                >
+                  Edit Credentials
+                </button>
+              )}
+            </div>
+
+            {/* Status messages */}
             {syncStatus && (
-              <p className={`text-xs mt-1 ${syncStatus === "Failed" ? "text-red-400" : "text-green-400"}`}>
+              <p className={`text-xs mt-2 ${syncStatus === "Failed" ? "text-red-400" : "text-green-400"}`}>
                 {syncStatus}
               </p>
+            )}
+            {oauthError && (
+              <p className="text-xs mt-2 text-red-400">{oauthError}</p>
             )}
           </div>
 

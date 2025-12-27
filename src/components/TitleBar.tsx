@@ -16,7 +16,7 @@ export function TitleBar({ onSettingsClick }: TitleBarProps) {
   return (
     <div
       onMouseDown={handleDragStart}
-      className="h-10 flex items-center justify-between px-4 bg-dark-800 select-none cursor-default"
+      className="h-10 flex items-center justify-between px-4 bg-dark-800 select-none cursor-default rounded-t-xl"
     >
       <div className="flex items-center gap-2">
         <span className="text-lg">⏰</span>

@@ -37,6 +37,20 @@
         padding: 8px;
       }
 
+      .quick-add-content {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .hint-text {
+        color: #52525b;
+        font-size: 11px;
+        text-align: center;
+        margin: 0;
+      }
+
       .input-wrapper {
         position: relative;
         padding: 2px;
@@ -81,9 +95,9 @@
         width: 100%;
         background: transparent;
         border: none;
-        padding: 12px 16px;
+        padding: 16px 20px;
         color: #fafafa;
-        font-size: 14px;
+        font-size: 18px;
         outline: none;
       }
 
@@ -94,19 +108,42 @@
       input:disabled {
         opacity: 0.6;
       }
+
+      .input-box.saving {
+        position: relative;
+      }
+
+      .input-box.saving::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.2), transparent);
+        animation: loading-sweep 1s ease-in-out infinite;
+      }
+
+      @keyframes loading-sweep {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+      }
     </style>
   </head>
   <body>
     <div class="container">
-      <div class="input-wrapper">
-        <div class="input-box">
-          <input
-            type="text"
-            id="input"
-            placeholder="e.g., call mom in 2 hours"
-            autofocus
-          />
+      <div class="quick-add-content">
+        <div class="input-wrapper">
+          <div class="input-box">
+            <input
+              type="text"
+              id="input"
+              placeholder="What do you need to remember?"
+              autofocus
+            />
+          </div>
         </div>
+        <p class="hint-text">Try: "call mom in 2 hours" or "meeting at 3pm"</p>
       </div>
     </div>
 
@@ -138,12 +175,33 @@
         const win = getCurrentWindow();
         let isBusy = false;
 
+        const inputBox = document.querySelector('.input-box');
+
         console.log('Quick add initialized, window:', win.label);
 
-        // Focus input after a small delay to ensure window is ready
-        setTimeout(() => {
+        // Clear any previous input and reset state
+        input.value = '';
+        input.disabled = false;
+        inputBox.classList.remove('saving');
+
+        // Aggressive focus strategy for Windows
+        async function focusInput() {
+          // First ensure window has focus
+          try {
+            await win.setFocus();
+          } catch (e) {
+            console.log('setFocus error:', e);
+          }
+          // Then focus the input
           input.focus();
-        }, 50);
+        }
+
+        // Focus immediately and keep trying
+        focusInput();
+        setTimeout(focusInput, 50);
+        setTimeout(focusInput, 100);
+        setTimeout(focusInput, 200);
+        setTimeout(focusInput, 500);
 
         // Parse natural time from text
         function parseNaturalTime(text) {
@@ -243,6 +301,7 @@
 
           isBusy = true;
           input.disabled = true;
+          inputBox.classList.add('saving');
 
           const parsed = parseNaturalTime(text);
           console.log('Parsed:', parsed);

@@ -32,32 +32,37 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
   };
 
   return (
-    <div className="flex gap-2">
-      <input
-        ref={inputRef as RefObject<HTMLInputElement>}
-        type="text"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="e.g., call mom in 2 hours"
-        className="flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-3
-                   text-white placeholder-gray-500 focus:outline-none focus:border-accent-blue
-                   focus:ring-1 focus:ring-accent-blue"
-        disabled={syncing}
-      />
-      <button
-        onClick={handleSubmit}
-        disabled={syncing || !text.trim()}
-        className="bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 disabled:cursor-not-allowed
-                   text-white font-medium px-6 py-3 rounded-lg transition-colors
-                   flex items-center justify-center min-w-[56px]"
-      >
-        {syncing ? (
-          <span className="animate-pulse-soft">...</span>
-        ) : (
-          <span className="text-xl">+</span>
-        )}
-      </button>
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          ref={inputRef as RefObject<HTMLInputElement>}
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="e.g., call mom in 2 hours"
+          className="flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-3
+                     text-white placeholder-gray-500 focus:outline-none focus:border-accent-blue
+                     focus:ring-1 focus:ring-accent-blue"
+          disabled={syncing}
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={syncing || !text.trim()}
+          className="bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 disabled:cursor-not-allowed
+                     text-white font-medium px-6 py-3 rounded-lg transition-colors
+                     flex items-center justify-center min-w-[56px]"
+        >
+          {syncing ? (
+            <span className="animate-pulse-soft">...</span>
+          ) : (
+            <span className="text-xl">+</span>
+          )}
+        </button>
+      </div>
+      <p className="text-xs text-gray-600 px-1">
+        Try: "meeting at 3pm" · "call mom in 2 hours" · "submit report tomorrow"
+      </p>
     </div>
   );
 }

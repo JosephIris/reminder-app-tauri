@@ -45,3 +45,25 @@ select {
 .no-select {
   user-select: none;
 }
+
+/* Toast slide-in animation */
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Rounded window corners */
+html, body, #root {
+  border-radius: 12px;
+  overflow: hidden;
+}

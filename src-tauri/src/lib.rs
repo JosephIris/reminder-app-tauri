@@ -12,7 +12,7 @@ use tauri::{
     WebviewUrl,
     WebviewWindowBuilder,
 };
-use storage::Storage;
+use storage::{Storage, OAuthCredentials};
 use reminder::Reminder;
 
 // Counter for notification window positioning
@@ -41,15 +41,22 @@ pub struct AppState {
     pub storage: Mutex<Storage>,
 }
 
+impl AppState {
+    /// Lock storage, recovering from poison if needed
+    fn lock_storage(&self) -> std::sync::MutexGuard<'_, Storage> {
+        self.storage.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 #[tauri::command]
 fn get_pending_reminders(state: tauri::State<AppState>) -> Result<Vec<Reminder>, String> {
-    let storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let storage = state.lock_storage();
     Ok(storage.get_pending_reminders())
 }
 
 #[tauri::command]
 fn get_completed_reminders(state: tauri::State<AppState>) -> Result<Vec<Reminder>, String> {
-    let storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let storage = state.lock_storage();
     Ok(storage.get_completed_reminders())
 }
 
@@ -60,7 +67,7 @@ fn add_reminder(
     due_time: String,
     recurrence: String,
 ) -> Result<i64, String> {
-    let mut storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let mut storage = state.lock_storage();
     let reminder = Reminder::new(message, due_time, recurrence);
     storage.add_reminder(reminder)
 }
@@ -73,32 +80,110 @@ fn update_reminder(
     due_time: String,
     recurrence: String,
 ) -> Result<(), String> {
-    let mut storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let mut storage = state.lock_storage();
     storage.update_reminder(id, message, due_time, recurrence)
 }
 
 #[tauri::command]
 fn delete_reminder(state: tauri::State<AppState>, id: i64) -> Result<(), String> {
-    let mut storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let mut storage = state.lock_storage();
     storage.delete_reminder(id)
 }
 
 #[tauri::command]
 fn complete_reminder(state: tauri::State<AppState>, id: i64) -> Result<(), String> {
-    let mut storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let mut storage = state.lock_storage();
     storage.complete_reminder(id)
 }
 
 #[tauri::command]
+fn uncomplete_reminder(state: tauri::State<AppState>, id: i64) -> Result<(), String> {
+    let mut storage = state.lock_storage();
+    storage.uncomplete_reminder(id)
+}
+
+#[tauri::command]
 fn snooze_reminder(state: tauri::State<AppState>, id: i64, minutes: i64) -> Result<(), String> {
-    let mut storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let mut storage = state.lock_storage();
     storage.snooze_reminder(id, minutes)
 }
 
 #[tauri::command]
 fn refresh_from_cloud(state: tauri::State<AppState>) -> Result<bool, String> {
-    let mut storage = state.storage.lock().map_err(|e| e.to_string())?;
+    let mut storage = state.lock_storage();
     storage.refresh_from_cloud()
+}
+
+#[tauri::command]
+fn get_oauth_status(state: tauri::State<AppState>) -> Result<(bool, bool), String> {
+    let storage = state.lock_storage();
+    Ok(storage.get_oauth_status())
+}
+
+#[tauri::command]
+fn save_oauth_credentials(
+    state: tauri::State<AppState>,
+    client_id: String,
+    client_secret: String,
+) -> Result<(), String> {
+    let storage = state.lock_storage();
+    let credentials = OAuthCredentials {
+        client_id,
+        client_secret,
+    };
+    storage.save_oauth_credentials(&credentials)
+}
+
+#[tauri::command]
+fn get_oauth_url(state: tauri::State<AppState>) -> Result<String, String> {
+    let storage = state.lock_storage();
+    storage.get_oauth_url()
+}
+
+#[tauri::command]
+fn get_oauth_credentials(state: tauri::State<AppState>) -> Result<(String, String), String> {
+    let storage = state.lock_storage();
+    match storage.get_oauth_credentials() {
+        Some(creds) => Ok((creds.client_id, creds.client_secret)),
+        None => Err("No credentials found".to_string()),
+    }
+}
+
+#[tauri::command]
+fn start_oauth_flow(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // Get the OAuth URL and app data path for the background thread
+    let (url, app_data_path) = {
+        let storage = state.lock_storage();
+        let url = storage.get_oauth_url()?;
+        let path = storage.get_app_data_path().to_path_buf();
+        (url, path)
+    };
+
+    // Open browser
+    open::that(&url).map_err(|e| format!("Failed to open browser: {}", e))?;
+
+    // Do the entire OAuth flow (this blocks until user completes OAuth in browser)
+    // Using ureq instead of reqwest means no tokio runtime issues
+    let result = storage::complete_oauth_flow_blocking(&app_data_path);
+
+    // If successful, reload the storage state
+    if result.is_ok() {
+        let mut storage = state.lock_storage();
+        storage.reload_oauth_state()?;
+        eprintln!("OAuth flow completed successfully");
+    } else {
+        eprintln!("OAuth flow failed: {:?}", result);
+    }
+
+    result
+}
+
+#[tauri::command]
+fn disconnect_drive(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut storage = state.lock_storage();
+    storage.disconnect_drive()
 }
 
 #[tauri::command]
@@ -184,21 +269,28 @@ async fn show_quick_add(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     // Get primary monitor for centering
-    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
-    let primary = monitors.into_iter().next().ok_or("No monitor found")?;
+    let primary = app.primary_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or("No primary monitor found")?;
+
     let screen_size = primary.size();
+    let screen_position = primary.position();
     let scale_factor = primary.scale_factor();
 
-    // Window dimensions
-    let width = 400u32;
-    let height = 56u32;
+    // Window dimensions (40% bigger than original 400x56, plus room for hint text)
+    let width = 560u32;
+    let height = 100u32;
 
-    // Center horizontally, position in upper third of screen
-    let x = ((screen_size.width as f64 / scale_factor) as u32 - width) / 2;
-    let y = ((screen_size.height as f64 / scale_factor) as u32) / 3;
+    // Calculate logical screen dimensions
+    let screen_width = (screen_size.width as f64 / scale_factor) as i32;
+    let screen_height = (screen_size.height as f64 / scale_factor) as i32;
+
+    // Center on the primary monitor (accounting for monitor position in multi-monitor setups)
+    let x = screen_position.x + (screen_width - width as i32) / 2;
+    let y = screen_position.y + (screen_height - height as i32) / 2;
 
     // Create the quick-add window
-    let _window = WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         &app,
         label,
         WebviewUrl::App("/quick-add.html".into()),
@@ -214,6 +306,9 @@ async fn show_quick_add(app: tauri::AppHandle) -> Result<(), String> {
     .focused(true)
     .build()
     .map_err(|e| e.to_string())?;
+
+    // Explicitly set focus after creation (needed on Windows)
+    window.set_focus().map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -361,6 +456,8 @@ pub fn run() {
     let storage = Storage::new().expect("Failed to initialize storage");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -484,6 +581,7 @@ pub fn run() {
             update_reminder,
             delete_reminder,
             complete_reminder,
+            uncomplete_reminder,
             snooze_reminder,
             refresh_from_cloud,
             show_notification_window,
@@ -493,6 +591,12 @@ pub fn run() {
             show_quick_add,
             unregister_shortcuts,
             register_shortcuts,
+            get_oauth_status,
+            save_oauth_credentials,
+            get_oauth_credentials,
+            get_oauth_url,
+            start_oauth_flow,
+            disconnect_drive,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

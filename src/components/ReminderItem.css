@@ -1,0 +1,150 @@
+@property --gradient-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@property --glow-opacity {
+  syntax: "<number>";
+  initial-value: 0.4;
+  inherits: false;
+}
+
+.reminder-item-wrapper {
+  position: relative;
+  padding: 2px;
+  border-radius: 10px;
+  background: transparent;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.reminder-item-wrapper.focused {
+  background: conic-gradient(
+    from var(--gradient-angle),
+    #8b5cf6,
+    #6366f1,
+    #3b82f6,
+    #06b6d4,
+    #8b5cf6
+  );
+  animation: gradient-rotate 2s linear infinite, glow-pulse 2s ease-in-out infinite;
+  box-shadow:
+    0 0 15px rgba(139, 92, 246, var(--glow-opacity)),
+    0 0 30px rgba(99, 102, 241, calc(var(--glow-opacity) * 0.5));
+}
+
+@keyframes gradient-rotate {
+  to {
+    --gradient-angle: 360deg;
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    --glow-opacity: 0.3;
+  }
+  50% {
+    --glow-opacity: 0.6;
+  }
+}
+
+.reminder-item-inner {
+  background: #262626;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.reminder-item-wrapper.focused .reminder-item-inner {
+  background: #1a1a1a;
+}
+
+/* Shimmer effect for focused items */
+.reminder-item-wrapper.focused .reminder-item-inner::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -100%;
+  width: 80%;
+  height: 200%;
+  background: linear-gradient(
+    120deg,
+    transparent 20%,
+    rgba(139, 92, 246, 0.08) 30%,
+    rgba(99, 102, 241, 0.15) 40%,
+    rgba(59, 130, 246, 0.2) 50%,
+    rgba(99, 102, 241, 0.15) 60%,
+    rgba(139, 92, 246, 0.08) 70%,
+    transparent 80%
+  );
+  animation: shimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 200%;
+  }
+}
+
+/* Entry animation */
+.reminder-item-wrapper {
+  animation: slide-in-item 0.3s ease-out;
+}
+
+@keyframes slide-in-item {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Exit animation for completing/deleting */
+.reminder-item-wrapper.leaving {
+  animation: slide-out-item 0.3s ease-in forwards;
+}
+
+@keyframes slide-out-item {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(30px) scale(0.95);
+  }
+}
+
+/* Urgent pulse for items < 15 min */
+.reminder-item-wrapper.pulse-urgent .reminder-item-inner {
+  animation: urgent-pulse 2s ease-in-out infinite;
+}
+
+@keyframes urgent-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.4);
+  }
+}
+
+/* Clickable cursor */
+.reminder-item-wrapper {
+  cursor: pointer;
+}
+
+.reminder-item-wrapper:hover .reminder-item-inner {
+  background: #2a2a2a;
+}

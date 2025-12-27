@@ -1,12 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type { Reminder } from "../types";
+import { showToast } from "../components/Toast";
 
 export function useReminders() {
   const [pending, setPending] = useState<Reminder[]>([]);
   const [completed, setCompleted] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [leavingIds, setLeavingIds] = useState<Set<number>>(new Set());
+
+  // Store last deleted/completed for undo
+  const lastActionRef = useRef<{ type: "complete" | "delete"; reminder: Reminder } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -18,6 +24,7 @@ export function useReminders() {
       setCompleted(completedList);
     } catch (error) {
       console.error("Failed to fetch reminders:", error);
+      showToast("Failed to load reminders", "error");
     } finally {
       setLoading(false);
     }
@@ -32,36 +39,120 @@ export function useReminders() {
         recurrence,
       });
       await refresh();
+      await emit("refresh-reminders");
+      showToast("Reminder added", "success");
+    } catch (error) {
+      console.error("Failed to add reminder:", error);
+      showToast("Failed to add reminder", "error");
     } finally {
       setSyncing(false);
     }
   }, [refresh]);
 
   const completeReminder = useCallback(async (id: number) => {
+    // Find the reminder before completing for undo
+    const reminder = pending.find(r => r.id === id);
+    if (!reminder) return;
+
+    // Start leaving animation
+    setLeavingIds(prev => new Set(prev).add(id));
+
+    // Wait for animation
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     setSyncing(true);
     try {
       await invoke("complete_reminder", { id });
+      lastActionRef.current = { type: "complete", reminder };
       await refresh();
+      await emit("refresh-reminders");
+
+      // Show toast with undo option
+      showToast("Completed", "success", async () => {
+        // Undo: uncomplete the reminder
+        try {
+          await invoke("uncomplete_reminder", { id });
+          await refresh();
+          await emit("refresh-reminders");
+          showToast("Restored", "info");
+        } catch (e) {
+          console.error("Failed to undo:", e);
+        }
+      });
+    } catch (error) {
+      console.error("Failed to complete reminder:", error);
+      showToast("Failed to complete reminder", "error");
     } finally {
       setSyncing(false);
+      setLeavingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
-  }, [refresh]);
+  }, [refresh, pending]);
 
-  const deleteReminder = useCallback(async (id: number) => {
+  const deleteReminder = useCallback(async (id: number, skipAnimation = false) => {
+    // Find the reminder before deleting for potential restore
+    const reminder = pending.find(r => r.id === id) || completed.find(r => r.id === id);
+
+    if (!skipAnimation) {
+      // Start leaving animation
+      setLeavingIds(prev => new Set(prev).add(id));
+      // Wait for animation
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
     setSyncing(true);
     try {
       await invoke("delete_reminder", { id });
+      if (reminder) {
+        lastActionRef.current = { type: "delete", reminder };
+      }
       await refresh();
+      await emit("refresh-reminders");
+
+      // Show toast with undo option (only if we have the reminder data)
+      if (reminder) {
+        showToast("Deleted", "info", async () => {
+          // Undo: re-add the reminder
+          try {
+            await invoke("add_reminder", {
+              message: reminder.message,
+              dueTime: reminder.due_time,
+              recurrence: reminder.recurrence || "none",
+            });
+            await refresh();
+            await emit("refresh-reminders");
+            showToast("Restored", "info");
+          } catch (e) {
+            console.error("Failed to undo:", e);
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Failed to delete reminder:", error);
+      showToast("Failed to delete reminder", "error");
     } finally {
       setSyncing(false);
+      setLeavingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
-  }, [refresh]);
+  }, [refresh, pending, completed]);
 
   const snoozeReminder = useCallback(async (id: number, minutes: number) => {
     setSyncing(true);
     try {
       await invoke("snooze_reminder", { id, minutes });
       await refresh();
+      await emit("refresh-reminders");
+      showToast(`Snoozed for ${minutes} minutes`, "info");
+    } catch (error) {
+      console.error("Failed to snooze reminder:", error);
+      showToast("Failed to snooze reminder", "error");
     } finally {
       setSyncing(false);
     }
@@ -77,6 +168,11 @@ export function useReminders() {
         recurrence,
       });
       await refresh();
+      await emit("refresh-reminders");
+      showToast("Reminder updated", "success");
+    } catch (error) {
+      console.error("Failed to update reminder:", error);
+      showToast("Failed to update reminder", "error");
     } finally {
       setSyncing(false);
     }
@@ -87,7 +183,14 @@ export function useReminders() {
     try {
       const synced = await invoke<boolean>("refresh_from_cloud");
       await refresh();
+      if (synced) {
+        showToast("Synced from cloud", "success");
+      }
       return synced;
+    } catch (error) {
+      console.error("Failed to sync from cloud:", error);
+      showToast("Failed to sync from cloud", "error");
+      return false;
     } finally {
       setSyncing(false);
     }
@@ -102,6 +205,7 @@ export function useReminders() {
     completed,
     loading,
     syncing,
+    leavingIds,
     refresh,
     addReminder,
     completeReminder,

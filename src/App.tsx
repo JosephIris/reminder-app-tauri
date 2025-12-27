@@ -1,12 +1,15 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { TitleBar } from "./components/TitleBar";
 import { ReminderInput } from "./components/ReminderInput";
 import { ReminderItem } from "./components/ReminderItem";
 import { CompletedSection } from "./components/CompletedSection";
 import { EditDialog } from "./components/EditDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { ToastContainer } from "./components/Toast";
 import { useReminders } from "./hooks/useReminders";
 import type { Reminder } from "./types";
 
@@ -16,6 +19,7 @@ function App() {
     completed,
     loading,
     syncing,
+    leavingIds,
     addReminder,
     completeReminder,
     deleteReminder,
@@ -27,10 +31,25 @@ function App() {
 
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [focusedReminderId, setFocusedReminderId] = useState<number | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState<{ version: string; download: () => Promise<void> } | null>(null);
+  const [updating, setUpdating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Track if bar is currently shown
   const barShownRef = useRef(false);
+
+  // Track if we're the source of the focus event (to avoid processing our own emit)
+  const isLocalFocusRef = useRef(false);
+
+  // Handle focus from list - emit to bar
+  const handleFocusReminder = useCallback(async (id: number | null) => {
+    setFocusedReminderId(id);
+    // Mark that we're emitting, so we ignore our own event
+    isLocalFocusRef.current = true;
+    // Emit to bar so it syncs
+    await emit("focus-reminder", { id });
+  }, []);
 
   // Check for due reminders every 10 seconds
   useEffect(() => {
@@ -73,8 +92,8 @@ function App() {
     // Check immediately
     checkDueReminders();
 
-    // Set up interval
-    const intervalId = setInterval(checkDueReminders, 10000);
+    // Set up interval - check every 5 seconds
+    const intervalId = setInterval(checkDueReminders, 5000);
     return () => clearInterval(intervalId);
   }, [pending, loading]);
 
@@ -108,12 +127,55 @@ function App() {
     };
   }, []);
 
+  // Check for updates on startup
+  useEffect(() => {
+    const checkForUpdates = async () => {
+      try {
+        const update = await check();
+        if (update) {
+          console.log(`Update available: ${update.version}`);
+          setUpdateAvailable({
+            version: update.version,
+            download: async () => {
+              setUpdating(true);
+              try {
+                await update.downloadAndInstall();
+                await relaunch();
+              } catch (e) {
+                console.error("Update failed:", e);
+                setUpdating(false);
+              }
+            },
+          });
+        }
+      } catch (e) {
+        console.error("Update check failed:", e);
+      }
+    };
+    checkForUpdates();
+  }, []);
+
+  // Listen for focus-reminder event from the reminder bar
+  useEffect(() => {
+    const unlisten = listen<{ id: number | null }>("focus-reminder", (event) => {
+      // Ignore if we're the source of this event
+      if (isLocalFocusRef.current) {
+        isLocalFocusRef.current = false;
+        return;
+      }
+      setFocusedReminderId(event.payload.id);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // Bar now fetches its own reminders directly from Rust backend on load,
   // and listens for "refresh-reminders" events for updates
 
   if (loading) {
     return (
-      <div className="h-screen flex flex-col bg-dark-900">
+      <div className="h-screen flex flex-col bg-dark-900 rounded-xl border border-dark-700 overflow-hidden">
         <TitleBar onSettingsClick={() => setShowSettings(true)} />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-gray-400 animate-pulse-soft">Loading...</div>
@@ -123,30 +185,59 @@ function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-dark-900">
+    <div className="h-screen flex flex-col bg-dark-900 rounded-xl border border-dark-700 overflow-hidden">
       <TitleBar onSettingsClick={() => setShowSettings(true)} />
 
       <div className="flex-1 overflow-hidden flex flex-col p-4">
+        {/* Update banner */}
+        {updateAvailable && (
+          <div className="mb-3 p-3 bg-accent-blue/20 border border-accent-blue/30 rounded-lg flex items-center justify-between">
+            <span className="text-sm text-white">
+              Update v{updateAvailable.version} available
+            </span>
+            <button
+              onClick={updateAvailable.download}
+              disabled={updating}
+              className="px-3 py-1 bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 text-white text-sm rounded transition-colors"
+            >
+              {updating ? "Updating..." : "Update Now"}
+            </button>
+          </div>
+        )}
+
         {/* Input */}
         <ReminderInput onAdd={addReminder} syncing={syncing} inputRef={inputRef} />
 
-        {/* Pending reminders */}
-        <div className="flex-1 overflow-y-auto mt-3 space-y-1">
+        {/* Pending reminders - px-1 gives room for glow effect */}
+        <div className="flex-1 overflow-y-auto mt-4 space-y-2 px-1">
           {pending.length === 0 ? (
-            <div className="text-center text-gray-600 py-8 text-sm">
-              No reminders
+            <div className="text-center py-12">
+              <div className="text-4xl mb-3 opacity-50">📭</div>
+              <p className="text-gray-500 text-sm">No upcoming reminders</p>
+              <p className="text-gray-600 text-xs mt-1">Add one above to get started</p>
             </div>
           ) : (
-            pending.map((reminder) => (
-              <ReminderItem
-                key={reminder.id}
-                reminder={reminder}
-                onComplete={completeReminder}
-                onDelete={deleteReminder}
-                onSnooze={snoozeReminder}
-                onEdit={setEditingReminder}
-              />
-            ))
+            <>
+              <div className="flex items-center justify-between px-1 mb-2">
+                <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Upcoming
+                </h2>
+                <span className="text-xs text-gray-600">{pending.length} reminder{pending.length !== 1 ? 's' : ''}</span>
+              </div>
+              {pending.map((reminder) => (
+                <ReminderItem
+                  key={reminder.id}
+                  reminder={reminder}
+                  isFocused={focusedReminderId === reminder.id}
+                  isLeaving={leavingIds.has(reminder.id)}
+                  onComplete={completeReminder}
+                  onDelete={deleteReminder}
+                  onSnooze={snoozeReminder}
+                  onEdit={setEditingReminder}
+                  onFocus={handleFocusReminder}
+                />
+              ))}
+            </>
           )}
 
           {/* Completed section */}
@@ -170,6 +261,9 @@ function App() {
           onRefreshFromCloud={refreshFromCloud}
         />
       )}
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   );
 }

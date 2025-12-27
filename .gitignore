@@ -26,3 +26,4 @@ token.json
 
 # Tauri
 src-tauri/WixTools/
+src-tauri/.tauri-private-key
