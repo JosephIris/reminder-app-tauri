@@ -20,6 +20,23 @@ static APPBAR_REGISTERED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 const APPBAR_CALLBACK: u32 = WM_USER + 1;
 
+/// Write debug info to a log file in the user's temp directory
+#[cfg(windows)]
+fn log_debug(msg: &str) {
+    use std::io::Write;
+    if let Some(temp_dir) = std::env::var_os("TEMP") {
+        let log_path = std::path::Path::new(&temp_dir).join("reminder-app-debug.log");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            let _ = writeln!(file, "[{}] {}", timestamp, msg);
+        }
+    }
+}
+
 /// Register a window as an appbar docked at the bottom of the screen.
 /// bar_height is in logical pixels (will be converted to physical for Windows API).
 /// Returns the adjusted work area rect in logical pixels for Tauri.
@@ -31,6 +48,8 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
 
     const DEFAULT_DPI: u32 = 96;  // Standard Windows DPI (100% scaling)
 
+    log_debug("=== register_appbar called ===");
+
     let hwnd = HWND(hwnd as *mut _);
 
     // Get DPI scale for this specific window (more accurate than system DPI)
@@ -40,8 +59,8 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     // Convert logical bar height to physical pixels for Windows API
     let physical_bar_height = (bar_height as f64 * scale).round() as i32;
 
-    println!("DPI: {}, scale: {:.3}, logical bar height: {}, physical: {}",
-             dpi, scale, bar_height, physical_bar_height);
+    log_debug(&format!("DPI: {}, scale: {:.3}, logical bar height: {}, physical: {}",
+             dpi, scale, bar_height, physical_bar_height));
 
     // Get monitor info for screen bounds
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY) };
@@ -52,13 +71,14 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
 
     let success = unsafe { GetMonitorInfoW(monitor, &mut monitor_info) };
     if !success.as_bool() {
+        log_debug("ERROR: Failed to get monitor info");
         return Err("Failed to get monitor info".to_string());
     }
 
     let monitor_area = monitor_info.rcMonitor;
 
-    println!("Monitor area: left={}, top={}, right={}, bottom={}",
-             monitor_area.left, monitor_area.top, monitor_area.right, monitor_area.bottom);
+    log_debug(&format!("Monitor area: left={}, top={}, right={}, bottom={}",
+             monitor_area.left, monitor_area.top, monitor_area.right, monitor_area.bottom));
 
     // Query the taskbar position directly - this is more reliable than work area
     let mut taskbar_abd = APPBARDATA {
@@ -67,8 +87,8 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     };
     unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut taskbar_abd) };
 
-    println!("Taskbar rect: left={}, top={}, right={}, bottom={}, edge={:?}",
-             taskbar_abd.rc.left, taskbar_abd.rc.top, taskbar_abd.rc.right, taskbar_abd.rc.bottom, taskbar_abd.uEdge);
+    log_debug(&format!("Taskbar rect: left={}, top={}, right={}, bottom={}, edge={:?}",
+             taskbar_abd.rc.left, taskbar_abd.rc.top, taskbar_abd.rc.right, taskbar_abd.rc.bottom, taskbar_abd.uEdge));
 
     // Calculate where our bar should go - directly above the taskbar
     // The taskbar's top edge is where our bar's bottom should be
@@ -89,12 +109,13 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
         lParam: LPARAM(0),
     };
 
-    println!("Requesting appbar rect: left={}, top={}, right={}, bottom={}",
-             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
+    log_debug(&format!("Requesting appbar rect: left={}, top={}, right={}, bottom={}",
+             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom));
 
     // Register the appbar
     let result = unsafe { SHAppBarMessage(ABM_NEW, &mut abd) };
     if result == 0 {
+        log_debug("ERROR: Failed to register appbar");
         return Err("Failed to register appbar".to_string());
     }
 
@@ -103,15 +124,15 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     // Query the position to see what space is available
     unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut abd) };
 
-    println!("After QUERYPOS: left={}, top={}, right={}, bottom={}",
-             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
+    log_debug(&format!("After QUERYPOS: left={}, top={}, right={}, bottom={}",
+             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom));
 
     // Set the final position - ensure we request exactly the height we need
     abd.rc.top = abd.rc.bottom - physical_bar_height;
     unsafe { SHAppBarMessage(ABM_SETPOS, &mut abd) };
 
-    println!("After SETPOS: left={}, top={}, right={}, bottom={}",
-             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
+    log_debug(&format!("After SETPOS: left={}, top={}, right={}, bottom={}",
+             abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom));
 
     // Convert back to logical pixels for Tauri using precise rounding
     let logical_x = (abd.rc.left as f64 / scale).round() as i32;
@@ -119,7 +140,7 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     let logical_w = ((abd.rc.right - abd.rc.left) as f64 / scale).round() as i32;
     let logical_h = ((abd.rc.bottom - abd.rc.top) as f64 / scale).round() as i32;
 
-    println!("Returning logical rect: x={}, y={}, w={}, h={}", logical_x, logical_y, logical_w, logical_h);
+    log_debug(&format!("Returning logical rect: x={}, y={}, w={}, h={}", logical_x, logical_y, logical_w, logical_h));
 
     Ok((logical_x, logical_y, logical_w, logical_h))
 }
