@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Reminder App",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "identifier": "com.josephiris.reminder",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -49,7 +49,7 @@
       "endpoints": [
         "https://github.com/JosephIris/reminder-app-tauri/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQThDQjZENTg1RjZBN0QKUldSOWFsOVliY3VvN0R4QXFSQ1ozVzU2LzU0TWlMMWdRanc1TlJSR2QxMGphTUx2bGQxT1RVZ2YK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlBQUREMUNFODc3ODNCRTIKUldUaU8zaUh6dEd0bXBVQ3VWNzV3Y3pLS0hHLzVKQmpLQytnT1JHQVhjdTVlRmp1WUlHTmlyaEwK"
     }
   }
 }

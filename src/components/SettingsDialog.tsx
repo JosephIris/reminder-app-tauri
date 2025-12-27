@@ -423,7 +423,7 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
 
           {/* About */}
           <div className="pt-4 border-t border-dark-600">
-            <p className="text-xs text-gray-500 mb-2">Reminder App v1.1.4</p>
+            <p className="text-xs text-gray-500 mb-2">Reminder App v1.1.5</p>
             <div className="flex items-center gap-2">
               <button
                 onClick={async () => {
