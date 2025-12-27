@@ -27,6 +27,7 @@ const APPBAR_CALLBACK: u32 = WM_USER + 1;
 pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i32), String> {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows::Win32::UI::Shell::ABM_GETTASKBARPOS;
 
     const DEFAULT_DPI: u32 = 96;  // Standard Windows DPI (100% scaling)
 
@@ -42,7 +43,7 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     println!("DPI: {}, scale: {:.3}, logical bar height: {}, physical: {}",
              dpi, scale, bar_height, physical_bar_height);
 
-    // Get work area (screen minus existing appbars like taskbar)
+    // Get monitor info for screen bounds
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY) };
     let mut monitor_info = MONITORINFO {
         cbSize: std::mem::size_of::<MONITORINFO>() as u32,
@@ -54,31 +55,41 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
         return Err("Failed to get monitor info".to_string());
     }
 
-    let work_area = monitor_info.rcWork;
     let monitor_area = monitor_info.rcMonitor;
 
-    println!("Monitor area (physical): left={}, top={}, right={}, bottom={}",
+    println!("Monitor area: left={}, top={}, right={}, bottom={}",
              monitor_area.left, monitor_area.top, monitor_area.right, monitor_area.bottom);
-    println!("Work area (physical): left={}, top={}, right={}, bottom={}",
-             work_area.left, work_area.top, work_area.right, work_area.bottom);
 
-    // Use work_area for positioning - this already excludes the taskbar
-    // The bar should be positioned at the bottom of the work area
+    // Query the taskbar position directly - this is more reliable than work area
+    let mut taskbar_abd = APPBARDATA {
+        cbSize: std::mem::size_of::<APPBARDATA>() as u32,
+        ..Default::default()
+    };
+    unsafe { SHAppBarMessage(ABM_GETTASKBARPOS, &mut taskbar_abd) };
+
+    println!("Taskbar rect: left={}, top={}, right={}, bottom={}, edge={:?}",
+             taskbar_abd.rc.left, taskbar_abd.rc.top, taskbar_abd.rc.right, taskbar_abd.rc.bottom, taskbar_abd.uEdge);
+
+    // Calculate where our bar should go - directly above the taskbar
+    // The taskbar's top edge is where our bar's bottom should be
+    let bar_bottom = taskbar_abd.rc.top;
+    let bar_top = bar_bottom - physical_bar_height;
+
     let mut abd = APPBARDATA {
         cbSize: std::mem::size_of::<APPBARDATA>() as u32,
         hWnd: hwnd,
         uCallbackMessage: APPBAR_CALLBACK,
         uEdge: ABE_BOTTOM,
         rc: RECT {
-            left: work_area.left,
-            top: work_area.bottom - physical_bar_height,
-            right: work_area.right,
-            bottom: work_area.bottom,
+            left: monitor_area.left,
+            top: bar_top,
+            right: monitor_area.right,
+            bottom: bar_bottom,
         },
         lParam: LPARAM(0),
     };
 
-    println!("Requesting appbar rect (physical): left={}, top={}, right={}, bottom={}",
+    println!("Requesting appbar rect: left={}, top={}, right={}, bottom={}",
              abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
 
     // Register the appbar
@@ -92,14 +103,14 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     // Query the position to see what space is available
     unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut abd) };
 
-    println!("After QUERYPOS (physical): left={}, top={}, right={}, bottom={}",
+    println!("After QUERYPOS: left={}, top={}, right={}, bottom={}",
              abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
 
     // Set the final position - ensure we request exactly the height we need
     abd.rc.top = abd.rc.bottom - physical_bar_height;
     unsafe { SHAppBarMessage(ABM_SETPOS, &mut abd) };
 
-    println!("After SETPOS (physical): left={}, top={}, right={}, bottom={}",
+    println!("After SETPOS: left={}, top={}, right={}, bottom={}",
              abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
 
     // Convert back to logical pixels for Tauri using precise rounding
