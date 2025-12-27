@@ -21,12 +21,26 @@ static APPBAR_REGISTERED: AtomicBool = AtomicBool::new(false);
 const APPBAR_CALLBACK: u32 = WM_USER + 1;
 
 /// Register a window as an appbar docked at the bottom of the screen.
-/// Returns the adjusted work area rect that the bar should occupy.
+/// bar_height is in logical pixels (will be converted to physical for Windows API).
+/// Returns the adjusted work area rect in logical pixels for Tauri.
 #[cfg(windows)]
 pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i32), String> {
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
+    use windows::Win32::UI::HiDpi::GetDpiForSystem;
+
+    const DEFAULT_DPI: u32 = 96;  // Standard Windows DPI (100% scaling)
 
     let hwnd = HWND(hwnd as *mut _);
+
+    // Get DPI scale
+    let dpi = unsafe { GetDpiForSystem() };
+    let scale = dpi as f64 / DEFAULT_DPI as f64;
+
+    // Convert logical bar height to physical pixels for Windows API
+    let physical_bar_height = (bar_height as f64 * scale) as i32;
+
+    println!("DPI: {}, scale: {}, logical bar height: {}, physical: {}",
+             dpi, scale, bar_height, physical_bar_height);
 
     // Get work area (screen minus existing appbars like taskbar)
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY) };
@@ -57,7 +71,7 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
         uEdge: ABE_BOTTOM,
         rc: RECT {
             left: monitor_area.left,  // Use monitor area left (should be 0 for primary)
-            top: work_area.bottom - bar_height,
+            top: work_area.bottom - physical_bar_height,
             right: monitor_area.right,  // Use monitor area right (full width)
             bottom: work_area.bottom,
         },
@@ -78,12 +92,20 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     println!("After QUERYPOS: {:?}", abd.rc);
 
     // Set the final position
-    abd.rc.top = abd.rc.bottom - bar_height;
+    abd.rc.top = abd.rc.bottom - physical_bar_height;
     unsafe { SHAppBarMessage(ABM_SETPOS, &mut abd) };
 
-    println!("After SETPOS: {:?}", abd.rc);
+    println!("After SETPOS (physical): {:?}", abd.rc);
 
-    Ok((abd.rc.left, abd.rc.top, abd.rc.right - abd.rc.left, abd.rc.bottom - abd.rc.top))
+    // Convert back to logical pixels for Tauri
+    let logical_x = (abd.rc.left as f64 / scale) as i32;
+    let logical_y = (abd.rc.top as f64 / scale) as i32;
+    let logical_w = ((abd.rc.right - abd.rc.left) as f64 / scale) as i32;
+    let logical_h = ((abd.rc.bottom - abd.rc.top) as f64 / scale) as i32;
+
+    println!("Returning logical rect: ({}, {}, {}, {})", logical_x, logical_y, logical_w, logical_h);
+
+    Ok((logical_x, logical_y, logical_w, logical_h))
 }
 
 /// Unregister the appbar when done.
@@ -104,7 +126,19 @@ pub fn unregister_appbar(hwnd: isize) {
     APPBAR_REGISTERED.store(false, Ordering::SeqCst);
 }
 
+/// Get the DPI scale factor for the primary monitor
+#[cfg(windows)]
+fn get_dpi_scale() -> f64 {
+    use windows::Win32::UI::HiDpi::GetDpiForSystem;
+
+    const DEFAULT_DPI: u32 = 96;  // Standard Windows DPI (100% scaling)
+
+    let dpi = unsafe { GetDpiForSystem() };
+    dpi as f64 / DEFAULT_DPI as f64
+}
+
 /// Get the work area (screen minus taskbar and other appbars) for the primary monitor.
+/// Returns values in logical pixels (DPI-scaled for Tauri).
 #[cfg(windows)]
 pub fn get_work_area() -> Result<(i32, i32, i32, i32), String> {
     use windows::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS};
@@ -123,9 +157,17 @@ pub fn get_work_area() -> Result<(i32, i32, i32, i32), String> {
         return Err("Failed to get work area".to_string());
     }
 
-    // Return position and size - for primary monitor, left should typically be 0
-    // but we return the actual values for multi-monitor support
-    Ok((rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top))
+    // Convert from physical pixels to logical pixels for Tauri
+    let scale = get_dpi_scale();
+    let x = (rect.left as f64 / scale) as i32;
+    let y = (rect.top as f64 / scale) as i32;
+    let width = ((rect.right - rect.left) as f64 / scale) as i32;
+    let height = ((rect.bottom - rect.top) as f64 / scale) as i32;
+
+    println!("DPI scale: {}, physical rect: {:?}, logical: ({}, {}, {}, {})",
+             scale, rect, x, y, width, height);
+
+    Ok((x, y, width, height))
 }
 
 /// Get the primary monitor's full screen bounds (ignoring work area).
