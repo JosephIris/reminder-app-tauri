@@ -24,7 +24,8 @@
       "Bash(powershell:*)",
       "Bash(cargo clean:*)",
       "Bash(tasklist /FI \"IMAGENAME eq reminder-app.exe\")",
-      "Bash(npx @tauri-apps/cli signer generate:*)"
+      "Bash(npx @tauri-apps/cli signer generate:*)",
+      "Bash(git tag:*)"
     ]
   }
 }
