@@ -453,6 +453,16 @@ async fn hide_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Set Per-Monitor DPI awareness before any windows are created
+    // This ensures coordinates are consistent on high-DPI displays like Surface
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+        unsafe {
+            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
     let storage = Storage::new().expect("Failed to initialize storage");
 
     tauri::Builder::default()
