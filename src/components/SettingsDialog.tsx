@@ -77,11 +77,14 @@ function ShortcutInput({ onSave, onCancel }: ShortcutInputProps) {
 interface SettingsDialogProps {
   onClose: () => void;
   onRefreshFromCloud?: () => Promise<boolean>;
+  onCheckForUpdates?: () => Promise<"available" | "up-to-date" | "error">;
+  checkingForUpdates?: boolean;
 }
 
-export function SettingsDialog({ onClose, onRefreshFromCloud }: SettingsDialogProps) {
+export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates, checkingForUpdates }: SettingsDialogProps) {
   const [autoStart, setAutoStart] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [editingShortcut, setEditingShortcut] = useState<"quickAdd" | "showList" | null>(null);
@@ -420,8 +423,32 @@ export function SettingsDialog({ onClose, onRefreshFromCloud }: SettingsDialogPr
 
           {/* About */}
           <div className="pt-4 border-t border-dark-600">
-            <p className="text-xs text-gray-500">Reminder App v1.0.0</p>
-            <p className="text-xs text-gray-500">Built with Tauri + React</p>
+            <p className="text-xs text-gray-500 mb-2">Reminder App v1.0.0</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  if (onCheckForUpdates) {
+                    setUpdateStatus(null);
+                    const result = await onCheckForUpdates();
+                    if (result === "up-to-date") {
+                      setUpdateStatus("You're up to date!");
+                    } else if (result === "error") {
+                      setUpdateStatus("Failed to check for updates");
+                    }
+                    // "available" case is handled by the update banner in App.tsx
+                  }
+                }}
+                disabled={checkingForUpdates}
+                className="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 disabled:bg-dark-700 text-white text-sm rounded-lg transition-colors"
+              >
+                {checkingForUpdates ? "Checking..." : "Check for Updates"}
+              </button>
+              {updateStatus && (
+                <span className={`text-xs ${updateStatus.includes("Failed") ? "text-red-400" : "text-green-400"}`}>
+                  {updateStatus}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

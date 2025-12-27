@@ -34,6 +34,7 @@ function App() {
   const [focusedReminderId, setFocusedReminderId] = useState<number | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState<{ version: string; download: () => Promise<void> } | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Track if bar is currently shown
@@ -127,33 +128,41 @@ function App() {
     };
   }, []);
 
+  // Check for updates function - reusable for startup and manual checks
+  const checkForUpdates = useCallback(async (): Promise<"available" | "up-to-date" | "error"> => {
+    setCheckingForUpdates(true);
+    try {
+      const update = await check();
+      if (update) {
+        console.log(`Update available: ${update.version}`);
+        setUpdateAvailable({
+          version: update.version,
+          download: async () => {
+            setUpdating(true);
+            try {
+              await update.downloadAndInstall();
+              await relaunch();
+            } catch (e) {
+              console.error("Update failed:", e);
+              setUpdating(false);
+            }
+          },
+        });
+        return "available";
+      }
+      return "up-to-date";
+    } catch (e) {
+      console.error("Update check failed:", e);
+      return "error";
+    } finally {
+      setCheckingForUpdates(false);
+    }
+  }, []);
+
   // Check for updates on startup
   useEffect(() => {
-    const checkForUpdates = async () => {
-      try {
-        const update = await check();
-        if (update) {
-          console.log(`Update available: ${update.version}`);
-          setUpdateAvailable({
-            version: update.version,
-            download: async () => {
-              setUpdating(true);
-              try {
-                await update.downloadAndInstall();
-                await relaunch();
-              } catch (e) {
-                console.error("Update failed:", e);
-                setUpdating(false);
-              }
-            },
-          });
-        }
-      } catch (e) {
-        console.error("Update check failed:", e);
-      }
-    };
     checkForUpdates();
-  }, []);
+  }, [checkForUpdates]);
 
   // Listen for focus-reminder event from the reminder bar
   useEffect(() => {
@@ -259,6 +268,8 @@ function App() {
         <SettingsDialog
           onClose={() => setShowSettings(false)}
           onRefreshFromCloud={refreshFromCloud}
+          onCheckForUpdates={checkForUpdates}
+          checkingForUpdates={checkingForUpdates}
         />
       )}
 
