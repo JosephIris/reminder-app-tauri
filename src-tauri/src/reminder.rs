@@ -12,6 +12,8 @@ pub struct Reminder {
     pub is_snoozed: bool,
     pub original_due_time: Option<String>,
     pub completed_at: Option<String>,
+    #[serde(default)]
+    pub sort_order: i64, // Lower = higher priority (shown first in list / rightmost in bar)
 }
 
 impl Reminder {
@@ -26,6 +28,7 @@ impl Reminder {
             is_snoozed: false,
             original_due_time: None,
             completed_at: None,
+            sort_order: i64::MAX, // New reminders go to end by default
         }
     }
 

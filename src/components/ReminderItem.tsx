@@ -5,13 +5,18 @@ import "./ReminderItem.css";
 
 interface ReminderItemProps {
   reminder: Reminder;
+  index: number;
   isFocused?: boolean;
   isLeaving?: boolean;
+  isDragOver?: boolean;
   onComplete: (id: number) => void;
   onDelete: (id: number) => void;
   onSnooze: (id: number, minutes: number) => void;
   onEdit: (reminder: Reminder) => void;
   onFocus?: (id: number | null) => void;
+  onDragStart?: (e: React.DragEvent, index: number) => void;
+  onDragOver?: (e: React.DragEvent, index: number) => void;
+  onDragEnd?: () => void;
 }
 
 const urgencyColors = {
@@ -23,13 +28,18 @@ const urgencyColors = {
 
 export function ReminderItem({
   reminder,
+  index,
   isFocused,
   isLeaving,
+  isDragOver,
   onComplete,
   onDelete,
   onSnooze,
   onEdit,
-  onFocus
+  onFocus,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
 }: ReminderItemProps) {
   const [isHovered, setIsHovered] = useState(false);
   const itemRef = useRef<HTMLDivElement>(null);
@@ -53,11 +63,18 @@ export function ReminderItem({
   return (
     <div
       ref={itemRef}
-      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${urgency === "urgent" ? "pulse-urgent" : ""}`}
+      draggable
+      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${urgency === "urgent" ? "pulse-urgent" : ""} ${isDragOver ? "drag-over" : ""}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onDoubleClick={() => onEdit(reminder)}
       onClick={handleClick}
+      onDragStart={(e) => onDragStart?.(e, index)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver?.(e, index);
+      }}
+      onDragEnd={onDragEnd}
     >
       <div className="reminder-item-inner">
         {/* Message */}

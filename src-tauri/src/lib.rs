@@ -91,8 +91,21 @@ fn snooze_reminder(state: tauri::State<AppState>, id: i64, minutes: i64) -> Resu
 }
 
 #[tauri::command]
+fn reorder_reminders(state: tauri::State<AppState>, ordered_ids: Vec<i64>) -> Result<(), String> {
+    let mut storage = state.lock_storage();
+    storage.reorder_reminders(ordered_ids)
+}
+
+#[tauri::command]
 fn refresh_from_cloud(state: tauri::State<AppState>) -> Result<bool, String> {
     let mut storage = state.lock_storage();
+    storage.refresh_from_cloud()
+}
+
+#[tauri::command]
+fn sync_on_startup(state: tauri::State<AppState>) -> Result<bool, String> {
+    let mut storage = state.lock_storage();
+    // Try to sync from cloud if connected
     storage.refresh_from_cloud()
 }
 
@@ -442,6 +455,45 @@ async fn hide_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
+    let window = match app.get_webview_window("reminder-bar") {
+        Some(w) => w,
+        None => return Ok(()), // Bar not visible, nothing to do
+    };
+
+    // Only reposition on Windows where we use AppBar
+    #[cfg(windows)]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            let hwnd_val = hwnd.0 as isize;
+            let bar_height = 68;
+
+            // Unregister existing appbar
+            appbar::unregister_appbar(hwnd_val);
+
+            // Re-register with current monitor dimensions
+            match appbar::register_appbar(hwnd_val, bar_height) {
+                Ok((appbar_x, appbar_y, appbar_w, appbar_h)) => {
+                    println!("AppBar repositioned to: ({}, {}), size: {}x{}", appbar_x, appbar_y, appbar_w, appbar_h);
+                    let _ = window.set_position(tauri::Position::Logical(
+                        tauri::LogicalPosition::new(appbar_x as f64, appbar_y as f64)
+                    ));
+                    let _ = window.set_size(tauri::Size::Logical(
+                        tauri::LogicalSize::new(appbar_w as f64, appbar_h as f64)
+                    ));
+                }
+                Err(e) => {
+                    println!("Failed to reposition appbar: {}, falling back to always-on-top", e);
+                    let _ = window.set_always_on_top(true);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Set Per-Monitor DPI awareness before any windows are created
@@ -584,11 +636,14 @@ pub fn run() {
             complete_reminder,
             uncomplete_reminder,
             snooze_reminder,
+            reorder_reminders,
             refresh_from_cloud,
+            sync_on_startup,
             show_notification_window,
             close_notification_window,
             show_reminder_bar,
             hide_reminder_bar,
+            reposition_reminder_bar,
             show_quick_add,
             unregister_shortcuts,
             register_shortcuts,

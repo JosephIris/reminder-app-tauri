@@ -148,3 +148,21 @@
 .reminder-item-wrapper:hover .reminder-item-inner {
   background: #2a2a2a;
 }
+
+/* Drag and drop styles */
+.reminder-item-wrapper {
+  cursor: grab;
+}
+
+.reminder-item-wrapper:active {
+  cursor: grabbing;
+}
+
+.reminder-item-wrapper.drag-over {
+  border-top: 2px solid #6366f1;
+  margin-top: -2px;
+}
+
+.reminder-item-wrapper.drag-over .reminder-item-inner {
+  background: rgba(99, 102, 241, 0.1);
+}

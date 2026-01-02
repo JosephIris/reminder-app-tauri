@@ -27,6 +27,7 @@ function App() {
     updateReminder,
     refresh,
     refreshFromCloud,
+    reorderReminders,
   } = useReminders();
 
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
@@ -35,6 +36,8 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState<{ version: string; download: () => Promise<void> } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Track if bar is currently shown
@@ -51,6 +54,33 @@ function App() {
     // Emit to bar so it syncs
     await emit("focus-reminder", { id });
   }, []);
+
+  // Drag and drop handlers
+  const handleDragStart = useCallback((_e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+  }, []);
+
+  const handleDragOver = useCallback((_e: React.DragEvent, index: number) => {
+    if (draggedIndex !== null && draggedIndex !== index) {
+      setDragOverIndex(index);
+    }
+  }, [draggedIndex]);
+
+  const handleDragEnd = useCallback(async () => {
+    if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
+      // Calculate new order
+      const newPending = [...pending];
+      const [draggedItem] = newPending.splice(draggedIndex, 1);
+      newPending.splice(dragOverIndex, 0, draggedItem);
+
+      // Get ordered IDs and save
+      const orderedIds = newPending.map(r => r.id);
+      await reorderReminders(orderedIds);
+    }
+
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  }, [draggedIndex, dragOverIndex, pending, reorderReminders]);
 
   // Check for due reminders every 10 seconds
   useEffect(() => {
@@ -233,17 +263,22 @@ function App() {
                 </h2>
                 <span className="text-xs text-gray-600">{pending.length} reminder{pending.length !== 1 ? 's' : ''}</span>
               </div>
-              {pending.map((reminder) => (
+              {pending.map((reminder, index) => (
                 <ReminderItem
                   key={reminder.id}
                   reminder={reminder}
+                  index={index}
                   isFocused={focusedReminderId === reminder.id}
                   isLeaving={leavingIds.has(reminder.id)}
+                  isDragOver={dragOverIndex === index}
                   onComplete={completeReminder}
                   onDelete={deleteReminder}
                   onSnooze={snoozeReminder}
                   onEdit={setEditingReminder}
                   onFocus={handleFocusReminder}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDragEnd={handleDragEnd}
                 />
               ))}
             </>

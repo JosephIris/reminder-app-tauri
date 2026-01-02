@@ -385,7 +385,11 @@ impl Storage {
 
     pub fn get_pending_reminders(&self) -> Vec<Reminder> {
         let mut reminders = self.data.pending.clone();
-        reminders.sort_by(|a, b| a.due_time.cmp(&b.due_time));
+        // Primary sort by sort_order, secondary by due_time
+        reminders.sort_by(|a, b| {
+            a.sort_order.cmp(&b.sort_order)
+                .then_with(|| a.due_time.cmp(&b.due_time))
+        });
         reminders
     }
 
@@ -499,6 +503,17 @@ impl Storage {
             self.save()?;
         }
         Ok(())
+    }
+
+    /// Reorder pending reminders based on the given order of IDs
+    pub fn reorder_reminders(&mut self, ordered_ids: Vec<i64>) -> Result<(), String> {
+        // Update sort_order based on position in ordered_ids
+        for (index, id) in ordered_ids.iter().enumerate() {
+            if let Some(reminder) = self.data.pending.iter_mut().find(|r| r.id == *id) {
+                reminder.sort_order = index as i64;
+            }
+        }
+        self.save()
     }
 
     /// Check if OAuth credentials are configured

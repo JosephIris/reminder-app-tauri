@@ -238,9 +238,24 @@
         display: flex;
         gap: 4px;
         transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        /* Hidden by default - shown on hover or when focused */
+        opacity: 0;
+        pointer-events: none;
       }
 
-      /* Fade out actions/time instead of display:none for smooth animation */
+      /* Show actions on hover */
+      .reminder-card:hover .card-actions {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      /* Always show actions for focused card */
+      .focus-wrapper.active .card-actions {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      /* Hide actions completely for minimized cards when another is focused */
       .bar-container.has-focus .focus-wrapper:not(.active) .card-actions {
         opacity: 0;
         transform: scale(0.8);
@@ -586,7 +601,7 @@
         }
       }
 
-      function handleDragEnd() {
+      async function handleDragEnd() {
         const wasDragging = isDragging;
         const didReorder = draggedId !== null && isDragging && dropTargetIndex !== -1;
 
@@ -613,9 +628,17 @@
           setTimeout(() => { justFinishedDrag = false; }, 50);
         }
 
-        // Only re-render if we actually reordered (otherwise click handler will handle it)
+        // Only re-render and persist if we actually reordered
         if (didReorder) {
           render(true);  // Force recreate after reorder
+
+          // Persist the new order to storage
+          try {
+            await invoke('reorder_reminders', { orderedIds });
+            await emit('refresh-reminders');  // Sync to main window
+          } catch (e) {
+            console.error("Failed to persist order:", e);
+          }
         }
       }
 
@@ -731,12 +754,11 @@
       function updateReminders(newReminders) {
         reminders = newReminders;
 
-        // Update ordered IDs - keep existing order, add new at end (FIFO)
+        // Use server's sort order - reminders come sorted by sort_order from backend
         const newIds = newReminders.map(r => r.id);
-        const existingOrdered = orderedIds.filter(id => newIds.includes(id));
-        const brandNew = newIds.filter(id => !orderedIds.includes(id));
-        const idsChanged = orderedIds.length !== existingOrdered.length || brandNew.length > 0;
-        orderedIds = [...existingOrdered, ...brandNew];
+        const idsChanged = orderedIds.length !== newIds.length ||
+          !orderedIds.every((id, i) => id === newIds[i]);
+        orderedIds = newIds;
 
         // Clear focus if focused reminder no longer exists
         if (focusedId && !newIds.includes(focusedId)) {
@@ -804,6 +826,24 @@
 
       // Poll every second to catch newly due reminders in real-time
       setInterval(fetchReminders, 1000);
+
+      // Reposition bar when visibility changes (e.g., after monitor sleep/wake)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          console.log("Bar visibility restored, repositioning...");
+          invoke('reposition_reminder_bar').catch(e => {
+            console.error("Failed to reposition bar:", e);
+          });
+        }
+      });
+
+      // Also reposition on window focus (handles some edge cases)
+      window.addEventListener('focus', () => {
+        console.log("Bar focused, repositioning...");
+        invoke('reposition_reminder_bar').catch(e => {
+          console.error("Failed to reposition bar:", e);
+        });
+      });
     </script>
   </body>
 </html>

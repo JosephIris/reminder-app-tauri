@@ -196,8 +196,34 @@ export function useReminders() {
     }
   }, [refresh]);
 
+  const reorderReminders = useCallback(async (orderedIds: number[]) => {
+    try {
+      await invoke("reorder_reminders", { orderedIds });
+      await refresh();
+      await emit("refresh-reminders");
+    } catch (error) {
+      console.error("Failed to reorder reminders:", error);
+      showToast("Failed to reorder", "error");
+    }
+  }, [refresh]);
+
+  // Sync from cloud on startup and load reminders
   useEffect(() => {
-    refresh();
+    const initAndSync = async () => {
+      try {
+        // Try to sync from cloud first
+        const synced = await invoke<boolean>("sync_on_startup");
+        if (synced) {
+          showToast("Synced from cloud", "success");
+        }
+      } catch (e) {
+        // Cloud sync failed or not configured - that's OK
+        console.log("Startup sync skipped:", e);
+      }
+      // Load reminders regardless of sync result
+      await refresh();
+    };
+    initAndSync();
   }, [refresh]);
 
   return {
@@ -213,5 +239,6 @@ export function useReminders() {
     snoozeReminder,
     updateReminder,
     refreshFromCloud,
+    reorderReminders,
   };
 }
