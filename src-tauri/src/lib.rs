@@ -2,6 +2,7 @@ mod storage;
 mod reminder;
 mod appbar;
 mod urlencoding;
+mod updater;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -494,6 +495,16 @@ async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn check_for_update() -> Result<Option<updater::UpdateInfo>, String> {
+    updater::check_for_update()
+}
+
+#[tauri::command]
+async fn install_update(download_url: String) -> Result<(), String> {
+    updater::install_update(&download_url)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Set Per-Monitor DPI awareness before any windows are created
@@ -509,7 +520,6 @@ pub fn run() {
     let storage = Storage::new().expect("Failed to initialize storage");
 
     tauri::Builder::default()
-        // .plugin(tauri_plugin_updater::Builder::new().build())  // Disabled temporarily
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -653,6 +663,8 @@ pub fn run() {
             get_oauth_url,
             start_oauth_flow,
             disconnect_drive,
+            check_for_update,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

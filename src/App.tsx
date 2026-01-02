@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
-import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+
+interface UpdateInfo {
+  version: string;
+  current_version: string;
+  download_url: string;
+}
 import { TitleBar } from "./components/TitleBar";
 import { ReminderInput } from "./components/ReminderInput";
 import { ReminderItem } from "./components/ReminderItem";
@@ -162,15 +167,16 @@ function App() {
   const checkForUpdates = useCallback(async (): Promise<"available" | "up-to-date" | "error"> => {
     setCheckingForUpdates(true);
     try {
-      const update = await check();
+      const update = await invoke<UpdateInfo | null>("check_for_update");
       if (update) {
-        console.log(`Update available: ${update.version}`);
+        console.log(`Update available: ${update.version} (current: ${update.current_version})`);
         setUpdateAvailable({
           version: update.version,
           download: async () => {
             setUpdating(true);
             try {
-              await update.downloadAndInstall();
+              await invoke("install_update", { downloadUrl: update.download_url });
+              // App will restart automatically after self-replace
               await relaunch();
             } catch (e) {
               console.error("Update failed:", e);

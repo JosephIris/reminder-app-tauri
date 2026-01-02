@@ -44,3 +44,10 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      - name: Upload standalone exe for auto-update
+        uses: softprops/action-gh-release@v1
+        with:
+          files: src-tauri/target/release/reminder-app.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
