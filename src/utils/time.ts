@@ -1,3 +1,9 @@
+// Pre-compiled regex patterns for better performance
+const RELATIVE_TIME_PATTERN = /\b(in|after)\s+(\d+)\s*(min(?:ute)?s?|hr?s?|hours?|days?|d)\b/i;
+const ABSOLUTE_TIME_PATTERN = /\b(at|@)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
+const TOMORROW_PATTERN = /\btomorrow\b/i;
+const MESSAGE_CLEANUP_PATTERN = /^[-,\s]+|[-,\s]+$/g;
+
 /**
  * Parse natural language time expressions into a Date.
  * Examples: "in 5 minutes", "at 3pm", "tomorrow at 9am", "in 2 hours"
@@ -8,8 +14,7 @@ export function parseNaturalTime(text: string): { message: string; dueTime: Date
   let message = text.trim();
 
   // Patterns for relative time: "in X minutes/hours/days"
-  const relativePattern = /\b(in|after)\s+(\d+)\s*(min(?:ute)?s?|hr?s?|hours?|days?|d)\b/i;
-  const relativeMatch = text.match(relativePattern);
+  const relativeMatch = text.match(RELATIVE_TIME_PATTERN);
 
   if (relativeMatch) {
     const amount = parseInt(relativeMatch[2], 10);
@@ -24,12 +29,11 @@ export function parseNaturalTime(text: string): { message: string; dueTime: Date
       dueTime.setDate(dueTime.getDate() + amount);
     }
 
-    message = text.replace(relativePattern, "").trim();
+    message = text.replace(RELATIVE_TIME_PATTERN, "").trim();
   }
 
   // Patterns for absolute time: "at 3pm", "at 15:30"
-  const absolutePattern = /\b(at|@)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
-  const absoluteMatch = text.match(absolutePattern);
+  const absoluteMatch = text.match(ABSOLUTE_TIME_PATTERN);
 
   if (absoluteMatch && !dueTime) {
     let hours = parseInt(absoluteMatch[2], 10);
@@ -47,12 +51,11 @@ export function parseNaturalTime(text: string): { message: string; dueTime: Date
       dueTime.setDate(dueTime.getDate() + 1);
     }
 
-    message = text.replace(absolutePattern, "").trim();
+    message = text.replace(ABSOLUTE_TIME_PATTERN, "").trim();
   }
 
   // Handle "tomorrow" prefix
-  const tomorrowPattern = /\btomorrow\b/i;
-  if (tomorrowPattern.test(text)) {
+  if (TOMORROW_PATTERN.test(text)) {
     if (dueTime) {
       dueTime.setDate(dueTime.getDate() + 1);
     } else {
@@ -60,11 +63,11 @@ export function parseNaturalTime(text: string): { message: string; dueTime: Date
       dueTime.setDate(dueTime.getDate() + 1);
       dueTime.setHours(9, 0, 0, 0); // Default to 9am tomorrow
     }
-    message = message.replace(tomorrowPattern, "").trim();
+    message = message.replace(TOMORROW_PATTERN, "").trim();
   }
 
   // Clean up message
-  message = message.replace(/^[-,\s]+|[-,\s]+$/g, "").trim();
+  message = message.replace(MESSAGE_CLEANUP_PATTERN, "").trim();
 
   // Default to 5 minutes if no time found
   if (!dueTime) {

@@ -20,8 +20,8 @@ static APPBAR_REGISTERED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 const APPBAR_CALLBACK: u32 = WM_USER + 1;
 
-/// Write debug info to a log file in the user's temp directory
-#[cfg(windows)]
+/// Write debug info to a log file in the user's temp directory (only in debug builds)
+#[cfg(all(windows, debug_assertions))]
 fn log_debug(msg: &str) {
     use std::io::Write;
     if let Some(temp_dir) = std::env::var_os("TEMP") {
@@ -36,6 +36,10 @@ fn log_debug(msg: &str) {
         }
     }
 }
+
+/// No-op in release builds
+#[cfg(all(windows, not(debug_assertions)))]
+fn log_debug(_msg: &str) {}
 
 /// Register a window as an appbar docked at the bottom of the screen.
 /// bar_height is in logical pixels (will be converted to physical for Windows API).

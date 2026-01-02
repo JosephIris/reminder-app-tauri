@@ -1,6 +1,7 @@
 mod storage;
 mod reminder;
 mod appbar;
+mod urlencoding;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -17,25 +18,6 @@ use reminder::Reminder;
 
 // Counter for notification window positioning
 static NOTIFICATION_COUNT: AtomicU32 = AtomicU32::new(0);
-
-mod urlencoding {
-    pub fn encode(s: &str) -> String {
-        let mut result = String::new();
-        for c in s.chars() {
-            match c {
-                'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => result.push(c),
-                ' ' => result.push_str("%20"),
-                '\'' => result.push_str("%27"),
-                _ => {
-                    for b in c.to_string().as_bytes() {
-                        result.push_str(&format!("%{:02X}", b));
-                    }
-                }
-            }
-        }
-        result
-    }
-}
 
 pub struct AppState {
     pub storage: Mutex<Storage>,
@@ -125,11 +107,13 @@ fn save_oauth_credentials(
     state: tauri::State<AppState>,
     client_id: String,
     client_secret: String,
+    folder_id: Option<String>,
 ) -> Result<(), String> {
     let storage = state.lock_storage();
     let credentials = OAuthCredentials {
         client_id,
         client_secret,
+        folder_id: folder_id.unwrap_or_else(|| "1F0qYeAVU_7H73kX9uz-1ZF3i2KS_V-mk".to_string()),
     };
     storage.save_oauth_credentials(&credentials)
 }
@@ -150,7 +134,7 @@ fn get_oauth_credentials(state: tauri::State<AppState>) -> Result<(String, Strin
 }
 
 #[tauri::command]
-fn start_oauth_flow(
+async fn start_oauth_flow(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // Get the OAuth URL and app data path for the background thread
@@ -164,9 +148,12 @@ fn start_oauth_flow(
     // Open browser
     open::that(&url).map_err(|e| format!("Failed to open browser: {}", e))?;
 
-    // Do the entire OAuth flow (this blocks until user completes OAuth in browser)
-    // Using ureq instead of reqwest means no tokio runtime issues
-    let result = storage::complete_oauth_flow_blocking(&app_data_path);
+    // Run the blocking OAuth flow in a separate thread to avoid blocking the main thread
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        storage::complete_oauth_flow_blocking(&app_data_path)
+    })
+    .await
+    .map_err(|e| format!("OAuth task failed: {}", e))?;
 
     // If successful, reload the storage state
     if result.is_ok() {
@@ -193,6 +180,14 @@ async fn show_notification_window(
     message: String,
     due_time: String,
 ) -> Result<(), String> {
+    // Create unique window label
+    let label = format!("notification_{}", reminder_id);
+
+    // Check if window already exists first (before incrementing counter)
+    if app.get_webview_window(&label).is_some() {
+        return Ok(());
+    }
+
     // Get screen dimensions
     let monitors = app.available_monitors().map_err(|e| e.to_string())?;
     let primary = monitors.into_iter().next().ok_or("No monitor found")?;
@@ -205,18 +200,10 @@ async fn show_notification_window(
     let gap = 12u32;
     let taskbar_height = 48u32;
 
-    // Calculate position (stack from right)
+    // Calculate position (stack from right) - increment counter only after existence check
     let count = NOTIFICATION_COUNT.fetch_add(1, Ordering::SeqCst);
     let x = (screen_size.width as f64 / scale_factor) as u32 - popup_width - gap - (count * (popup_width + gap));
     let y = (screen_size.height as f64 / scale_factor) as u32 - popup_height - taskbar_height - gap;
-
-    // Create unique window label
-    let label = format!("notification_{}", reminder_id);
-
-    // Check if window already exists
-    if app.get_webview_window(&label).is_some() {
-        return Ok(());
-    }
 
     // Build the URL with query parameters
     let url = format!(
@@ -227,7 +214,7 @@ async fn show_notification_window(
     );
 
     // Create the notification window
-    let _window = WebviewWindowBuilder::new(
+    let window_result = WebviewWindowBuilder::new(
         &app,
         &label,
         WebviewUrl::App(url.into()),
@@ -241,10 +228,14 @@ async fn show_notification_window(
     .skip_taskbar(true)
     .transparent(true)
     .focused(true)
-    .build()
-    .map_err(|e| e.to_string())?;
+    .build();
 
-    Ok(())
+    // Roll back counter if window creation failed
+    if window_result.is_err() {
+        NOTIFICATION_COUNT.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    window_result.map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -480,8 +471,8 @@ pub fn run() {
         })
         .setup(|app| {
             // Create tray menu
-            let show_i = MenuItem::with_id(app, "show", "Show Reminders (Ctrl+Shift+L)", true, None::<&str>)?;
-            let quick_i = MenuItem::with_id(app, "quick", "Quick Add (Ctrl+Shift+R)", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show Reminders (Ctrl+Alt+L)", true, None::<&str>)?;
+            let quick_i = MenuItem::with_id(app, "quick", "Quick Add (Ctrl+Alt+R)", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quick_i, &quit_i])?;
 

@@ -1,4 +1,5 @@
 use crate::reminder::Reminder;
+use crate::urlencoding;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -6,7 +7,6 @@ use std::io::{Read as IoRead, Write as IoWrite};
 use std::net::TcpListener;
 use std::path::PathBuf;
 
-const FOLDER_ID: &str = "1F0qYeAVU_7H73kX9uz-1ZF3i2KS_V-mk";
 const OAUTH_REDIRECT_PORT: u16 = 8085;
 // Use drive scope to access all files, not just app-created ones
 const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/drive";
@@ -43,6 +43,12 @@ struct OAuthTokenResponse {
 pub struct OAuthCredentials {
     pub client_id: String,
     pub client_secret: String,
+    #[serde(default = "default_folder_id")]
+    pub folder_id: String,
+}
+
+fn default_folder_id() -> String {
+    "1F0qYeAVU_7H73kX9uz-1ZF3i2KS_V-mk".to_string()
 }
 
 pub struct Storage {
@@ -53,6 +59,7 @@ pub struct Storage {
     refresh_token: Option<String>,
     client_id: Option<String>,
     client_secret: Option<String>,
+    folder_id: Option<String>,
     file_id: Option<String>,
 }
 
@@ -72,6 +79,7 @@ impl Storage {
             refresh_token: None,
             client_id: None,
             client_secret: None,
+            folder_id: None,
             file_id: None,
         };
 
@@ -103,6 +111,13 @@ impl Storage {
 
         if self.access_token.is_none() {
             return Err("No access token in token.json".to_string());
+        }
+
+        // Load folder_id from credentials (with default fallback)
+        if let Ok(creds) = self.load_oauth_credentials() {
+            self.folder_id = Some(creds.folder_id);
+        } else {
+            self.folder_id = Some(default_folder_id());
         }
 
         self.use_drive = true;
@@ -177,18 +192,19 @@ impl Storage {
 
     fn find_or_create_drive_file(&mut self) -> Result<(), String> {
         let token = self.access_token.as_ref().ok_or("No access token")?;
+        let folder_id = self.folder_id.as_ref().ok_or("No folder ID configured")?;
 
         // Search for existing file in the specific folder
         let query = format!(
             "name='reminders.json' and '{}' in parents and trashed=false",
-            FOLDER_ID
+            folder_id
         );
         let url = format!(
             "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id)",
             urlencoding::encode(&query)
         );
 
-        eprintln!("Searching for reminders.json in folder {}...", FOLDER_ID);
+        eprintln!("Searching for reminders.json in folder {}...", folder_id);
 
         let response = ureq::get(&url)
             .set("Authorization", &format!("Bearer {}", token))
@@ -216,10 +232,11 @@ impl Storage {
 
     fn create_drive_file(&mut self) -> Result<(), String> {
         let token = self.access_token.as_ref().ok_or("No access token")?;
+        let folder_id = self.folder_id.as_ref().ok_or("No folder ID configured")?;
 
         let metadata = serde_json::json!({
             "name": "reminders.json",
-            "parents": [FOLDER_ID],
+            "parents": [folder_id],
             "mimeType": "application/json"
         });
 
@@ -348,10 +365,12 @@ impl Storage {
         // Always save locally as backup
         self.save_local()?;
 
-        // Also save to Drive if enabled
+        // Also save to Drive if enabled - propagate error so UI can show it
         if self.use_drive {
             if let Err(e) = self.save_to_drive() {
                 eprintln!("Failed to save to Drive: {}", e);
+                // Return error so the UI can notify the user, but data is still saved locally
+                return Err(format!("Saved locally but cloud sync failed: {}", e));
             }
         }
 
@@ -793,23 +812,4 @@ pub fn complete_oauth_flow_blocking(app_data_path: &std::path::Path) -> Result<(
 
     eprintln!("Token saved successfully");
     Ok(())
-}
-
-mod urlencoding {
-    pub fn encode(s: &str) -> String {
-        let mut result = String::new();
-        for c in s.chars() {
-            match c {
-                'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => result.push(c),
-                ' ' => result.push_str("%20"),
-                '\'' => result.push_str("%27"),
-                _ => {
-                    for b in c.to_string().as_bytes() {
-                        result.push_str(&format!("%{:02X}", b));
-                    }
-                }
-            }
-        }
-        result
-    }
 }

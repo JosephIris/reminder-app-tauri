@@ -104,7 +104,7 @@ function App() {
       refresh();
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten.then((fn) => fn()).catch(console.error);
     };
   }, [refresh]);
 
@@ -114,7 +114,7 @@ function App() {
       refresh();
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten.then((fn) => fn()).catch(console.error);
     };
   }, [refresh]);
 
@@ -124,7 +124,7 @@ function App() {
       inputRef.current?.focus();
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten.then((fn) => fn()).catch(console.error);
     };
   }, []);
 
@@ -175,7 +175,7 @@ function App() {
       setFocusedReminderId(event.payload.id);
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten.then((fn) => fn()).catch(console.error);
     };
   }, []);
 
