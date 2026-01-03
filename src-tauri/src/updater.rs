@@ -34,19 +34,11 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
 
     // Compare versions
     if version_is_newer(latest_version, current) {
-        // Find the Windows exe asset
-        let asset_name = format!("reminder-app_{}_x64.exe", latest.version);
-        let download_url = latest
-            .assets
-            .iter()
-            .find(|a| a.name == asset_name || a.name == "reminder-app.exe")
-            .map(|a| a.download_url.clone())
-            .unwrap_or_else(|| {
-                format!(
-                    "https://github.com/{}/{}/releases/download/{}/reminder-app.exe",
-                    REPO_OWNER, REPO_NAME, latest.version
-                )
-            });
+        // Use direct browser download URL (not API URL which requires Accept header)
+        let download_url = format!(
+            "https://github.com/{}/{}/releases/download/{}/reminder-app.exe",
+            REPO_OWNER, REPO_NAME, latest.version
+        );
 
         Ok(Some(UpdateInfo {
             version: latest.version,
@@ -102,6 +94,13 @@ pub fn install_update(download_url: &str) -> Result<(), String> {
 
     log(&format!("Downloaded {} bytes", bytes.len()));
 
+    // Validate we got an actual executable (PE files start with MZ)
+    if bytes.len() < 1_000_000 || !bytes.starts_with(b"MZ") {
+        let preview = String::from_utf8_lossy(&bytes[..bytes.len().min(200)]);
+        log(&format!("Invalid download - not a PE executable. Preview: {}", preview));
+        return Err("Downloaded file is not a valid Windows executable".to_string());
+    }
+
     // Write to temp file
     let mut file = fs::File::create(&temp_exe)
         .map_err(|e| {
@@ -125,28 +124,47 @@ pub fn install_update(download_url: &str) -> Result<(), String> {
 
     // Create a PowerShell script to replace the exe after this process exits
     let update_script = temp_dir.join("reminder-app-updater.ps1");
+    let ps_log = temp_dir.join("reminder-app-updater.log");
     let script_content = format!(
         r#"
-# Wait for the old process to exit
-Start-Sleep -Milliseconds 500
-$maxRetries = 20
+$logFile = "{}"
+function Log($msg) {{ Add-Content -Path $logFile -Value "[$(Get-Date -Format 'HH:mm:ss')] $msg" }}
+
+Log "Updater script started"
+Log "Waiting for app to exit..."
+Start-Sleep -Milliseconds 1000
+
+$maxRetries = 30
 $retryCount = 0
+$success = $false
+
 while ($retryCount -lt $maxRetries) {{
     try {{
-        # Try to replace the executable
+        Log "Attempt $($retryCount + 1): Copying update..."
         Copy-Item -Path "{}" -Destination "{}" -Force -ErrorAction Stop
+        $success = $true
+        Log "Copy succeeded!"
         break
     }} catch {{
+        Log "Copy failed: $_"
         $retryCount++
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds 500
     }}
 }}
-# Start the new version
-Start-Process -FilePath "{}"
-# Clean up
+
+if ($success) {{
+    Log "Starting new version..."
+    Start-Process -FilePath "{}"
+    Log "App started"
+}} else {{
+    Log "ERROR: Failed to copy after $maxRetries attempts"
+}}
+
+# Clean up temp exe
 Remove-Item -Path "{}" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+Log "Cleanup complete"
 "#,
+        ps_log.display(),
         temp_exe.display(),
         current_exe.display(),
         current_exe.display(),
