@@ -78,6 +78,13 @@
       .reminder-card:hover {
         background: #333;
         border-color: #505050;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      }
+
+      /* Motion One handles animations - CSS only for non-animated properties */
+      .reminder-card {
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease;
       }
 
       /* Disable hover effects during drag */
@@ -111,27 +118,14 @@
         inherits: false;
       }
 
-      /* Hover expanded state (after 2s) - show full text */
-      .focus-wrapper.hover-expanded .reminder-card {
-        min-width: 200px;
-        max-width: 280px;
-        padding: 8px 12px;
-        gap: 12px;
-      }
-
+      /* Hover expanded - Motion One animates size, CSS handles text */
       .focus-wrapper.hover-expanded .card-message {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
 
-      /* Hover with controls state (after 4s) - show actions */
-      .focus-wrapper.hover-controls .card-actions {
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      /* Focused state (click) - full expansion with glow */
+      /* Focused state (click) - glow effect, Motion One handles size/scale */
       .focus-wrapper.active {
         background: conic-gradient(
           from var(--gradient-angle),
@@ -151,10 +145,6 @@
         border-color: transparent;
         overflow: hidden;
         position: relative;
-        min-width: 320px;
-        max-width: 380px;
-        height: 48px;
-        padding: 10px 14px;
       }
 
       .focus-wrapper.active .card-message {
@@ -162,11 +152,6 @@
         white-space: normal;
         overflow: visible;
         text-overflow: clip;
-      }
-
-      .focus-wrapper.active .card-actions {
-        opacity: 1;
-        pointer-events: auto;
       }
 
       .focus-wrapper.active .card-btn {
@@ -180,27 +165,9 @@
         font-size: 11px;
       }
 
-      /* Minimize other cards when one is focused */
-      .bar-container.has-focus .focus-wrapper:not(.active) .reminder-card {
-        min-width: 80px;
-        max-width: 100px;
-        padding: 8px 10px;
-        gap: 8px;
-      }
-
+      /* Minimize other cards when one is focused - font size only, Motion One handles size */
       .bar-container.has-focus .focus-wrapper:not(.active) .card-message {
         font-size: 11px;
-      }
-
-      .bar-container.has-focus .focus-wrapper:not(.active) .card-actions {
-        opacity: 0;
-        pointer-events: none;
-        width: 0;
-        overflow: hidden;
-      }
-
-      .bar-container.has-focus .focus-wrapper:not(.active) .card-time {
-        display: none;
       }
 
       /* Shimmer effect - diagonal sweep */
@@ -268,28 +235,28 @@
         transition: font-size 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
-      /* Hide time by default - only show message in compact mode */
+      /* Hide time by default - Motion One handles animation */
       .card-time {
         color: #a1a1aa;
         font-size: 10px;
-        transition: opacity 0.2s ease;
         display: none;
+        opacity: 0;
+        transform: translateY(-4px);
       }
 
-      /* Show time when expanded or focused */
-      .focus-wrapper.hover-expanded .card-time,
-      .focus-wrapper.hover-controls .card-time,
-      .focus-wrapper.active .card-time {
-        display: block;
-      }
-
+      /* Hidden by default - Motion One handles animation */
       .card-actions {
         display: flex;
         gap: 4px;
-        transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        /* Hidden by default */
         opacity: 0;
+        transform: translateX(8px);
         pointer-events: none;
+      }
+
+      /* Enable pointer events when visible */
+      .focus-wrapper.hover-controls .card-actions,
+      .focus-wrapper.active .card-actions {
+        pointer-events: auto;
       }
 
       .card-btn {
@@ -401,8 +368,18 @@
     </div>
 
     <script type="module">
+      import { animate, spring } from "https://cdn.jsdelivr.net/npm/motion@11.11.13/+esm";
+
       const { invoke } = window.__TAURI__.core;
       const { listen, emit } = window.__TAURI__.event;
+
+      // Spring configurations for different animations
+      const springs = {
+        snappy: { stiffness: 500, damping: 30 },    // Quick, responsive
+        smooth: { stiffness: 300, damping: 25 },    // Balanced
+        gentle: { stiffness: 200, damping: 20 },    // Soft, elegant
+        bouncy: { stiffness: 400, damping: 15 }     // Playful with overshoot
+      };
 
       let reminders = [];
       let orderedIds = [];
@@ -422,6 +399,73 @@
       const hoverTimers = new Map(); // id -> { expandTimer, controlsTimer }
 
       console.log("[BAR] Script loaded");
+
+      // Spring animation helpers
+      function animateCardExpand(card, state) {
+        const configs = {
+          compact: { minWidth: 100, maxWidth: 160, padding: '8px 12px', height: 40 },
+          expanded: { minWidth: 200, maxWidth: 280, padding: '8px 12px', height: 40 },
+          focused: { minWidth: 320, maxWidth: 380, padding: '10px 14px', height: 48 },
+          minimized: { minWidth: 80, maxWidth: 100, padding: '8px 10px', height: 40 }
+        };
+        const config = configs[state] || configs.compact;
+
+        animate(card, {
+          minWidth: config.minWidth + 'px',
+          maxWidth: config.maxWidth + 'px',
+          height: config.height + 'px'
+        }, { easing: spring(springs.smooth) });
+      }
+
+      function animateActionsIn(actions) {
+        animate(actions, {
+          opacity: 1,
+          transform: 'translateX(0px)'
+        }, { easing: spring(springs.snappy) });
+      }
+
+      function animateActionsOut(actions) {
+        animate(actions, {
+          opacity: 0,
+          transform: 'translateX(8px)'
+        }, { easing: spring(springs.snappy) });
+      }
+
+      function animateTimeIn(time) {
+        time.style.display = 'block';
+        animate(time, {
+          opacity: 1,
+          transform: 'translateY(0px)'
+        }, { easing: spring(springs.gentle) });
+      }
+
+      function animateTimeOut(time) {
+        animate(time, {
+          opacity: 0,
+          transform: 'translateY(-4px)'
+        }, { easing: spring(springs.gentle) }).finished.then(() => {
+          time.style.display = 'none';
+        });
+      }
+
+      function animateFocusIn(wrapper) {
+        animate(wrapper, {
+          transform: 'scale(1.02)'
+        }, { easing: spring(springs.bouncy) });
+      }
+
+      function animateFocusOut(wrapper) {
+        animate(wrapper, {
+          transform: 'scale(1)'
+        }, { easing: spring(springs.smooth) });
+      }
+
+      function animateButtonPress(btn) {
+        animate(btn, { transform: 'scale(0.92)' }, { duration: 0.1 })
+          .finished.then(() => {
+            animate(btn, { transform: 'scale(1)' }, { easing: spring(springs.bouncy) });
+          });
+      }
 
       // Create tooltip element
       function createTooltip() {
@@ -496,22 +540,29 @@
         await emit("focus-reminder", { id: focusedId });
       }
 
-      // Hover state management
+      // Hover state management with spring animations
       function startHoverTimers(wrapper, reminder) {
         const id = reminder.id;
         clearHoverTimers(id);
+
+        const card = wrapper.querySelector('.reminder-card');
+        const time = wrapper.querySelector('.card-time');
+        const actions = wrapper.querySelector('.card-actions');
 
         const timers = {
           expandTimer: setTimeout(() => {
             if (!isDragging && focusedId !== id) {
               wrapper.classList.add('hover-expanded');
+              animateCardExpand(card, 'expanded');
+              if (time) animateTimeIn(time);
             }
-          }, 2000), // 2s for expand
+          }, 500), // 0.5s for expand
           controlsTimer: setTimeout(() => {
             if (!isDragging && focusedId !== id) {
               wrapper.classList.add('hover-controls');
+              if (actions) animateActionsIn(actions);
             }
-          }, 4000) // 4s for controls
+          }, 1000) // 1s for controls
         };
 
         hoverTimers.set(id, timers);
@@ -528,7 +579,21 @@
 
       function clearHoverState(wrapper, id) {
         clearHoverTimers(id);
+        const wasExpanded = wrapper.classList.contains('hover-expanded');
+        const hadControls = wrapper.classList.contains('hover-controls');
+
         wrapper.classList.remove('hover-expanded', 'hover-controls');
+
+        // Animate back to compact state
+        if (wasExpanded || hadControls) {
+          const card = wrapper.querySelector('.reminder-card');
+          const time = wrapper.querySelector('.card-time');
+          const actions = wrapper.querySelector('.card-actions');
+
+          animateCardExpand(card, 'compact');
+          if (time) animateTimeOut(time);
+          if (actions) animateActionsOut(actions);
+        }
       }
 
       function handleDragStart(e, id) {
@@ -728,12 +793,22 @@
           hideTooltip();
         });
 
-        // Action buttons
-        card.querySelector('.complete').addEventListener('click', () => handleComplete(reminder.id));
-        card.querySelector('.dismiss').addEventListener('click', () => handleDismiss(reminder.id));
+        // Action buttons with press animation
+        const completeBtn = card.querySelector('.complete');
+        completeBtn.addEventListener('click', () => {
+          animateButtonPress(completeBtn);
+          handleComplete(reminder.id);
+        });
+
+        const dismissBtn = card.querySelector('.dismiss');
+        dismissBtn.addEventListener('click', () => {
+          animateButtonPress(dismissBtn);
+          handleDismiss(reminder.id);
+        });
 
         card.querySelectorAll('.snooze-inline').forEach(btn => {
           btn.addEventListener('click', () => {
+            animateButtonPress(btn);
             handleSnooze(reminder.id, parseInt(btn.dataset.minutes));
           });
         });
@@ -765,13 +840,45 @@
         if (canUpdateInPlace) {
           existingWrappers.forEach(wrapper => {
             const id = parseInt(wrapper.dataset.id);
-            if (focusedId === id) {
+            const card = wrapper.querySelector('.reminder-card');
+            const time = wrapper.querySelector('.card-time');
+            const actions = wrapper.querySelector('.card-actions');
+            const wasActive = wrapper.classList.contains('active');
+            const shouldBeActive = focusedId === id;
+
+            if (shouldBeActive && !wasActive) {
+              // Becoming focused - animate in
               wrapper.classList.add('active');
-              // Clear hover states when focused
               wrapper.classList.remove('hover-expanded', 'hover-controls');
               clearHoverTimers(id);
-            } else {
+
+              animateFocusIn(wrapper);
+              animateCardExpand(card, 'focused');
+              if (time) animateTimeIn(time);
+              if (actions) animateActionsIn(actions);
+            } else if (!shouldBeActive && wasActive) {
+              // Losing focus - animate out
               wrapper.classList.remove('active');
+
+              animateFocusOut(wrapper);
+              // Check if there's still a focused card (minimize others)
+              if (focusedId !== null) {
+                animateCardExpand(card, 'minimized');
+                if (time) animateTimeOut(time);
+                if (actions) animateActionsOut(actions);
+              } else {
+                animateCardExpand(card, 'compact');
+                if (time) animateTimeOut(time);
+                if (actions) animateActionsOut(actions);
+              }
+            } else if (!shouldBeActive && focusedId !== null) {
+              // Another card is focused - minimize this one
+              animateCardExpand(card, 'minimized');
+              if (time) animateTimeOut(time);
+              if (actions) animateActionsOut(actions);
+            } else if (!shouldBeActive && focusedId === null && !wrapper.classList.contains('hover-expanded')) {
+              // No focus anywhere, return to compact
+              animateCardExpand(card, 'compact');
             }
           });
         } else {
