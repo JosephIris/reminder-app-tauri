@@ -158,11 +158,20 @@
   cursor: grabbing;
 }
 
+.reminder-item-wrapper.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.reminder-item-wrapper.dragging .reminder-item-inner {
+  background: #333;
+}
+
 .reminder-item-wrapper.drag-over {
-  border-top: 2px solid #6366f1;
-  margin-top: -2px;
+  border-top: 3px solid #6366f1;
+  margin-top: -3px;
 }
 
 .reminder-item-wrapper.drag-over .reminder-item-inner {
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(99, 102, 241, 0.15);
 }

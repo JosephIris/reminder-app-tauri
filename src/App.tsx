@@ -61,22 +61,30 @@ function App() {
   }, []);
 
   // Drag and drop handlers
-  const handleDragStart = useCallback((_e: React.DragEvent, index: number) => {
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    // Add some drag image styling
+    if (e.target instanceof HTMLElement) {
+      e.dataTransfer.setDragImage(e.target, 0, 0);
+    }
   }, []);
 
-  const handleDragOver = useCallback((_e: React.DragEvent, index: number) => {
-    if (draggedIndex !== null && draggedIndex !== index) {
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault(); // Required to allow drop
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedIndex !== null) {
       setDragOverIndex(index);
     }
   }, [draggedIndex]);
 
-  const handleDragEnd = useCallback(async () => {
-    if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
+  const handleDrop = useCallback(async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && draggedIndex !== dropIndex) {
       // Calculate new order
       const newPending = [...pending];
       const [draggedItem] = newPending.splice(draggedIndex, 1);
-      newPending.splice(dragOverIndex, 0, draggedItem);
+      newPending.splice(dropIndex, 0, draggedItem);
 
       // Get ordered IDs and save
       const orderedIds = newPending.map(r => r.id);
@@ -85,7 +93,12 @@ function App() {
 
     setDraggedIndex(null);
     setDragOverIndex(null);
-  }, [draggedIndex, dragOverIndex, pending, reorderReminders]);
+  }, [draggedIndex, pending, reorderReminders]);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  }, []);
 
   // Check for due reminders every 10 seconds
   useEffect(() => {
@@ -276,6 +289,7 @@ function App() {
                   index={index}
                   isFocused={focusedReminderId === reminder.id}
                   isLeaving={leavingIds.has(reminder.id)}
+                  isDragging={draggedIndex === index}
                   isDragOver={dragOverIndex === index}
                   onComplete={completeReminder}
                   onDelete={deleteReminder}
@@ -284,6 +298,7 @@ function App() {
                   onFocus={handleFocusReminder}
                   onDragStart={handleDragStart}
                   onDragOver={handleDragOver}
+                  onDrop={handleDrop}
                   onDragEnd={handleDragEnd}
                 />
               ))}

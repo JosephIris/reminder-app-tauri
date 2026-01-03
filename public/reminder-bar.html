@@ -38,7 +38,7 @@
         border-radius: 12px;
         display: flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
         padding: 0 12px;
         gap: 8px;
         overflow-x: auto;
@@ -58,33 +58,21 @@
         border-radius: 2px;
       }
 
+      /* Default: compact/minimized state */
       .reminder-card {
         flex-shrink: 0;
         background: #262626;
         border: 1px solid #404040;
         border-radius: 8px;
-        padding: 8px 12px;
+        padding: 8px 10px;
         display: flex;
         align-items: center;
-        gap: 12px;
-        min-width: 200px;
-        max-width: 280px;
+        gap: 8px;
+        min-width: 80px;
+        max-width: 120px;
         height: 40px;
         cursor: grab;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-
-      /* Minimized cards when another is focused */
-      .bar-container.has-focus .focus-wrapper:not(.active) .reminder-card {
-        min-width: 100px;
-        max-width: 100px;
-        padding: 8px 10px;
-        gap: 8px;
-      }
-
-      
-      .bar-container.has-focus .focus-wrapper:not(.active) .card-message {
-        font-size: 11px;
       }
 
       .reminder-card:hover {
@@ -123,6 +111,27 @@
         inherits: false;
       }
 
+      /* Hover expanded state (after 2s) - show full text */
+      .focus-wrapper.hover-expanded .reminder-card {
+        min-width: 200px;
+        max-width: 280px;
+        padding: 8px 12px;
+        gap: 12px;
+      }
+
+      .focus-wrapper.hover-expanded .card-message {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Hover with controls state (after 4s) - show actions */
+      .focus-wrapper.hover-controls .card-actions {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      /* Focused state (click) - full expansion with glow */
       .focus-wrapper.active {
         background: conic-gradient(
           from var(--gradient-angle),
@@ -150,6 +159,14 @@
 
       .focus-wrapper.active .card-message {
         font-size: 14px;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+      }
+
+      .focus-wrapper.active .card-actions {
+        opacity: 1;
+        pointer-events: auto;
       }
 
       .focus-wrapper.active .card-btn {
@@ -161,6 +178,31 @@
       .focus-wrapper.active .card-btn.snooze-inline {
         width: 28px;
         font-size: 11px;
+      }
+
+      /* Minimize other cards when one is focused */
+      .bar-container.has-focus .focus-wrapper:not(.active) .reminder-card {
+        min-width: 80px;
+        max-width: 100px;
+        padding: 8px 10px;
+        gap: 8px;
+      }
+
+      .bar-container.has-focus .focus-wrapper:not(.active) .card-message {
+        font-size: 11px;
+      }
+
+      .bar-container.has-focus .focus-wrapper:not(.active) .card-actions {
+        opacity: 0;
+        pointer-events: none;
+        width: 0;
+        overflow: hidden;
+      }
+
+      .bar-container.has-focus .focus-wrapper:not(.active) .card-time {
+        opacity: 0;
+        height: 0;
+        margin: 0;
       }
 
       /* Shimmer effect - diagonal sweep */
@@ -220,7 +262,7 @@
 
       .card-message {
         color: #fafafa;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 500;
         white-space: nowrap;
         overflow: hidden;
@@ -230,7 +272,7 @@
 
       .card-time {
         color: #a1a1aa;
-        font-size: 11px;
+        font-size: 10px;
         transition: opacity 0.2s ease;
       }
 
@@ -238,36 +280,9 @@
         display: flex;
         gap: 4px;
         transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        /* Hidden by default - shown on hover or when focused */
+        /* Hidden by default */
         opacity: 0;
         pointer-events: none;
-      }
-
-      /* Show actions on hover */
-      .reminder-card:hover .card-actions {
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      /* Always show actions for focused card */
-      .focus-wrapper.active .card-actions {
-        opacity: 1;
-        pointer-events: auto;
-      }
-
-      /* Hide actions completely for minimized cards when another is focused */
-      .bar-container.has-focus .focus-wrapper:not(.active) .card-actions {
-        opacity: 0;
-        transform: scale(0.8);
-        pointer-events: none;
-        width: 0;
-        overflow: hidden;
-      }
-
-      .bar-container.has-focus .focus-wrapper:not(.active) .card-time {
-        opacity: 0;
-        height: 0;
-        margin: 0;
       }
 
       .card-btn {
@@ -329,7 +344,7 @@
       /* Placeholder shows drop position */
       .drag-placeholder {
         flex-shrink: 0;
-        width: 200px;
+        width: 100px;
         height: 40px;
         background: rgba(99, 102, 241, 0.2);
         border: 2px dashed #6366f1;
@@ -343,125 +358,7 @@
         padding: 0 8px;
       }
 
-      /* Debug panel */
-      .debug-panel {
-        position: fixed;
-        top: 4px;
-        right: 4px;
-        background: rgba(0, 0, 0, 0.95);
-        border: 1px solid #404040;
-        border-radius: 6px;
-        padding: 8px;
-        font-size: 10px;
-        font-family: 'Consolas', 'Monaco', monospace;
-        color: #a1a1aa;
-        width: 380px;
-        max-height: 250px;
-        overflow-y: auto;
-        z-index: 9999;
-        display: none;
-      }
-
-      .debug-panel.visible {
-        display: block;
-      }
-
-      .debug-panel .debug-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 6px;
-        padding-bottom: 4px;
-        border-bottom: 1px solid #333;
-      }
-
-      .debug-panel .debug-title {
-        color: #fafafa;
-        font-weight: 600;
-        font-size: 11px;
-      }
-
-      .debug-panel .debug-btns {
-        display: flex;
-        gap: 4px;
-      }
-
-      .debug-panel .debug-btn {
-        background: #333;
-        border: none;
-        color: #a1a1aa;
-        padding: 3px 8px;
-        border-radius: 3px;
-        cursor: pointer;
-        font-size: 9px;
-      }
-
-      .debug-panel .debug-btn:hover {
-        background: #404040;
-        color: #fafafa;
-      }
-
-      .debug-panel .debug-btn.copy-btn:hover {
-        background: #6366f1;
-      }
-
-      .debug-panel .debug-log {
-        white-space: pre-wrap;
-        word-break: break-all;
-        line-height: 1.4;
-      }
-
-      .debug-panel .log-entry {
-        margin: 2px 0;
-        padding: 2px 0;
-        border-bottom: 1px solid #222;
-      }
-
-      .debug-panel .log-time {
-        color: #6366f1;
-        margin-right: 6px;
-      }
-
-      .debug-panel .log-info {
-        color: #22c55e;
-      }
-
-      .debug-panel .log-warn {
-        color: #f59e0b;
-      }
-
-      .debug-panel .log-error {
-        color: #ef4444;
-      }
-
-      .debug-panel .log-position {
-        color: #06b6d4;
-      }
-
-      .debug-toggle {
-        position: fixed;
-        top: 4px;
-        right: 4px;
-        background: rgba(0, 0, 0, 0.7);
-        border: 1px solid #333;
-        color: #6366f1;
-        width: 20px;
-        height: 20px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-        z-index: 9998;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .debug-toggle:hover {
-        background: #333;
-        color: #fafafa;
-      }
-
-      /* Tooltip styles - compact to fit in bar */
+      /* Tooltip styles */
       .tooltip {
         position: fixed;
         background: #1a1a1a;
@@ -492,17 +389,6 @@
     </style>
   </head>
   <body>
-    <button class="debug-toggle" id="debug-toggle" title="Toggle Debug Panel">🔧</button>
-    <div class="debug-panel" id="debug-panel">
-      <div class="debug-header">
-        <span class="debug-title">Debug Log</span>
-        <div class="debug-btns">
-          <button class="debug-btn" id="debug-clear">Clear</button>
-          <button class="debug-btn copy-btn" id="debug-copy">📋 Copy</button>
-        </div>
-      </div>
-      <div class="debug-log" id="debug-log"></div>
-    </div>
     <div class="bar-container" id="bar-container">
       <div class="empty-state">No reminders due</div>
     </div>
@@ -511,109 +397,24 @@
       const { invoke } = window.__TAURI__.core;
       const { listen, emit } = window.__TAURI__.event;
 
-      // ========== DEBUG LOGGING SYSTEM ==========
-      const debugLog = [];
-      const MAX_LOG_ENTRIES = 100;
-      let debugPanelVisible = false;
-      let lastWindowPosition = null;  // Track window position to detect actual changes
-
-      function formatLogTime() {
-        const now = new Date();
-        return now.toLocaleTimeString('en-US', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
-      }
-
-      function log(message, type = 'info') {
-        const entry = { time: formatLogTime(), message, type };
-        debugLog.push(entry);
-        if (debugLog.length > MAX_LOG_ENTRIES) {
-          debugLog.shift();
-        }
-        updateDebugPanel();
-
-        // Also log to console for dev tools
-        const prefix = `[BAR ${entry.time}]`;
-        if (type === 'error') console.error(prefix, message);
-        else if (type === 'warn') console.warn(prefix, message);
-        else console.log(prefix, message);
-      }
-
-      function logPosition(label, data) {
-        log(`${label}: ${JSON.stringify(data)}`, 'position');
-      }
-
-      function updateDebugPanel() {
-        const logEl = document.getElementById('debug-log');
-        if (!logEl) return;
-
-        logEl.innerHTML = debugLog.map(entry => {
-          const typeClass = entry.type === 'error' ? 'log-error' :
-                           entry.type === 'warn' ? 'log-warn' :
-                           entry.type === 'position' ? 'log-position' :
-                           'log-info';
-          return `<div class="log-entry"><span class="log-time">${entry.time}</span><span class="${typeClass}">${entry.message}</span></div>`;
-        }).join('');
-
-        // Auto-scroll to bottom
-        logEl.scrollTop = logEl.scrollHeight;
-      }
-
-      function getLogText() {
-        return debugLog.map(e => `[${e.time}] [${e.type.toUpperCase()}] ${e.message}`).join('\n');
-      }
-
-      // Setup debug panel controls
-      document.getElementById('debug-toggle').addEventListener('click', () => {
-        debugPanelVisible = !debugPanelVisible;
-        document.getElementById('debug-panel').classList.toggle('visible', debugPanelVisible);
-      });
-
-      document.getElementById('debug-clear').addEventListener('click', () => {
-        debugLog.length = 0;
-        updateDebugPanel();
-        log('Log cleared');
-      });
-
-      document.getElementById('debug-copy').addEventListener('click', async () => {
-        const text = getLogText();
-        try {
-          await navigator.clipboard.writeText(text);
-          log('Log copied to clipboard!', 'info');
-        } catch (e) {
-          log('Failed to copy: ' + e.message, 'error');
-        }
-      });
-
-      // Log initial window info
-      function logWindowInfo() {
-        const info = {
-          innerWidth: window.innerWidth,
-          innerHeight: window.innerHeight,
-          screenX: window.screenX,
-          screenY: window.screenY,
-          devicePixelRatio: window.devicePixelRatio
-        };
-        logPosition('Window', info);
-        return info;
-      }
-
-      // ========== END DEBUG LOGGING ==========
-
       let reminders = [];
       let orderedIds = [];
       let focusedId = null;
-      let ignoreNextFocusEvent = false;  // Flag to ignore our own focus events
+      let ignoreNextFocusEvent = false;
       let draggedId = null;
       let dragStartX = 0;
       let dragOffsetX = 0;
       let isDragging = false;
       let justFinishedDrag = false;
       let tooltipEl = null;
-      let tooltipTimeout = null;
       let ghostEl = null;
       let placeholderEl = null;
       let dropTargetIndex = -1;
 
-      log("Reminder bar script loaded");
+      // Hover state tracking per card
+      const hoverTimers = new Map(); // id -> { expandTimer, controlsTimer }
+
+      console.log("[BAR] Script loaded");
 
       // Create tooltip element
       function createTooltip() {
@@ -640,8 +441,7 @@
           <span class="tooltip-message">${reminder.message}</span>
           <span class="tooltip-time">Created: ${createdStr}</span>
         `;
-        // Position tooltip inside the bar window
-        const tooltipWidth = 420;  // approximate
+        const tooltipWidth = 420;
         tooltipEl.style.left = Math.min(Math.max(x - 100, 8), window.innerWidth - tooltipWidth) + 'px';
         tooltipEl.style.top = '8px';
         tooltipEl.style.bottom = 'auto';
@@ -651,10 +451,6 @@
       function hideTooltip() {
         if (tooltipEl) {
           tooltipEl.style.display = 'none';
-        }
-        if (tooltipTimeout) {
-          clearTimeout(tooltipTimeout);
-          tooltipTimeout = null;
         }
       }
 
@@ -673,7 +469,6 @@
 
       async function handleComplete(id) {
         await invoke("complete_reminder", { id });
-        // Emit to all windows - main will pick it up
         await emit("refresh-reminders");
       }
 
@@ -683,7 +478,6 @@
       }
 
       async function handleDismiss(id) {
-        // Delete from storage
         await invoke("delete_reminder", { id });
         await emit("refresh-reminders");
       }
@@ -691,16 +485,49 @@
       async function handleFocus(id) {
         focusedId = focusedId === id ? null : id;
         render();
-        // Mark that we're emitting, so we ignore our own event
         ignoreNextFocusEvent = true;
-        // Emit focus event to main window
         await emit("focus-reminder", { id: focusedId });
+      }
+
+      // Hover state management
+      function startHoverTimers(wrapper, reminder) {
+        const id = reminder.id;
+        clearHoverTimers(id);
+
+        const timers = {
+          expandTimer: setTimeout(() => {
+            if (!isDragging && focusedId !== id) {
+              wrapper.classList.add('hover-expanded');
+            }
+          }, 2000), // 2s for expand
+          controlsTimer: setTimeout(() => {
+            if (!isDragging && focusedId !== id) {
+              wrapper.classList.add('hover-controls');
+            }
+          }, 4000) // 4s for controls
+        };
+
+        hoverTimers.set(id, timers);
+      }
+
+      function clearHoverTimers(id) {
+        const timers = hoverTimers.get(id);
+        if (timers) {
+          clearTimeout(timers.expandTimer);
+          clearTimeout(timers.controlsTimer);
+          hoverTimers.delete(id);
+        }
+      }
+
+      function clearHoverState(wrapper, id) {
+        clearHoverTimers(id);
+        wrapper.classList.remove('hover-expanded', 'hover-controls');
       }
 
       function handleDragStart(e, id) {
         draggedId = id;
         dragStartX = e.clientX;
-        isDragging = false;  // Not dragging until we move enough
+        isDragging = false;
         hideTooltip();
 
         const wrapper = e.target.closest('.focus-wrapper');
@@ -748,10 +575,8 @@
       function handleDragMove(e) {
         if (draggedId === null) return;
 
-        // Only start actual dragging after moving 5px
         if (!isDragging && Math.abs(e.clientX - dragStartX) > 5) {
           isDragging = true;
-          // Create ghost when drag actually starts
           const wrapper = document.querySelector(`.focus-wrapper[data-id="${draggedId}"]`);
           if (wrapper) {
             createGhost(wrapper);
@@ -760,7 +585,6 @@
 
         if (!isDragging) return;
 
-        // Move ghost to follow cursor
         if (ghostEl) {
           ghostEl.style.left = (e.clientX - dragOffsetX) + 'px';
           ghostEl.style.top = (e.clientY - 20) + 'px';
@@ -769,8 +593,7 @@
         const container = document.getElementById('bar-container');
         const wrappers = Array.from(container.querySelectorAll('.focus-wrapper:not(.being-dragged)'));
 
-        // Find drop position
-        let newDropIndex = orderedIds.length; // Default to end
+        let newDropIndex = orderedIds.length;
 
         for (let i = 0; i < wrappers.length; i++) {
           const wrapper = wrappers[i];
@@ -783,13 +606,11 @@
           }
         }
 
-        // Account for dragged item position
         const draggedIndex = orderedIds.indexOf(draggedId);
         if (newDropIndex > draggedIndex) {
           newDropIndex--;
         }
 
-        // Update placeholder position if changed
         if (newDropIndex !== dropTargetIndex) {
           dropTargetIndex = newDropIndex;
           removePlaceholder();
@@ -797,7 +618,6 @@
           const placeholder = createPlaceholder();
           const allWrappers = Array.from(container.querySelectorAll('.focus-wrapper'));
 
-          // Insert placeholder at correct position
           let insertBeforeEl = null;
           let count = 0;
           for (const w of allWrappers) {
@@ -822,7 +642,6 @@
         const didReorder = draggedId !== null && isDragging && dropTargetIndex !== -1;
 
         if (didReorder) {
-          // Apply the reorder
           const draggedIndex = orderedIds.indexOf(draggedId);
           if (draggedIndex !== -1 && draggedIndex !== dropTargetIndex) {
             orderedIds.splice(draggedIndex, 1);
@@ -830,7 +649,6 @@
           }
         }
 
-        // Clean up
         removeGhost();
         removePlaceholder();
         dropTargetIndex = -1;
@@ -838,20 +656,17 @@
         isDragging = false;
         document.body.style.cursor = '';
 
-        // Prevent click from firing focus after drag
         if (wasDragging) {
           justFinishedDrag = true;
           setTimeout(() => { justFinishedDrag = false; }, 50);
         }
 
-        // Only re-render and persist if we actually reordered
         if (didReorder) {
-          render(true);  // Force recreate after reorder
+          render(true);
 
-          // Persist the new order to storage
           try {
             await invoke('reorder_reminders', { orderedIds });
-            await emit('refresh-reminders');  // Sync to main window
+            await emit('refresh-reminders');
           } catch (e) {
             console.error("Failed to persist order:", e);
           }
@@ -879,12 +694,13 @@
           </div>
         `;
 
-        // Event listeners
+        // Drag start
         card.addEventListener('mousedown', (e) => {
           if (e.target.closest('.card-actions')) return;
           handleDragStart(e, reminder.id);
         });
 
+        // Click to focus
         card.addEventListener('click', (e) => {
           if (e.target.closest('.card-actions')) return;
           if (!isDragging && !justFinishedDrag) {
@@ -892,24 +708,20 @@
           }
         });
 
-        // Tooltip on hover (only on card-content, not buttons)
-        const cardContent = card.querySelector('.card-content');
-        cardContent.addEventListener('mouseenter', (e) => {
-          tooltipTimeout = setTimeout(() => {
-            showTooltip(reminder, e.clientX, e.clientY);
-          }, 400);  // Show after 400ms hover
-        });
-
-        cardContent.addEventListener('mouseleave', () => {
-          hideTooltip();
-        });
-
-        cardContent.addEventListener('mousemove', (e) => {
-          if (tooltipEl && tooltipEl.style.display === 'flex') {
-            tooltipEl.style.left = Math.min(e.clientX, window.innerWidth - 320) + 'px';
+        // Hover state management - start timers on enter
+        wrapper.addEventListener('mouseenter', (e) => {
+          if (!isDragging && focusedId !== reminder.id) {
+            startHoverTimers(wrapper, reminder);
           }
         });
 
+        // Clear hover state on leave
+        wrapper.addEventListener('mouseleave', () => {
+          clearHoverState(wrapper, reminder.id);
+          hideTooltip();
+        });
+
+        // Action buttons
         card.querySelector('.complete').addEventListener('click', () => handleComplete(reminder.id));
         card.querySelector('.dismiss').addEventListener('click', () => handleDismiss(reminder.id));
 
@@ -926,7 +738,6 @@
       function render(forceRecreate = false) {
         const container = document.getElementById('bar-container');
 
-        // Toggle has-focus class based on whether any card is focused
         if (focusedId !== null) {
           container.classList.add('has-focus');
         } else {
@@ -938,7 +749,6 @@
           return;
         }
 
-        // Check if we can update in place (same cards, just focus change)
         const existingWrappers = container.querySelectorAll('.focus-wrapper');
         const existingIds = Array.from(existingWrappers).map(w => parseInt(w.dataset.id));
         const canUpdateInPlace = !forceRecreate &&
@@ -946,17 +756,21 @@
           existingIds.every((id, i) => id === orderedIds[i]);
 
         if (canUpdateInPlace) {
-          // Just update active states - no DOM recreation
           existingWrappers.forEach(wrapper => {
             const id = parseInt(wrapper.dataset.id);
             if (focusedId === id) {
               wrapper.classList.add('active');
+              // Clear hover states when focused
+              wrapper.classList.remove('hover-expanded', 'hover-controls');
+              clearHoverTimers(id);
             } else {
               wrapper.classList.remove('active');
             }
           });
         } else {
-          // Full rebuild needed
+          // Clear all hover timers before rebuild
+          hoverTimers.forEach((_, id) => clearHoverTimers(id));
+
           container.innerHTML = '';
           for (const id of orderedIds) {
             const reminder = reminders.find(r => r.id === id);
@@ -971,20 +785,19 @@
         reminders = newReminders;
 
         // Use server's sort order - reminders come sorted by sort_order from backend
+        // DON'T reverse - left of bar = top of list (lowest sort_order)
         const newIds = newReminders.map(r => r.id);
         const idsChanged = orderedIds.length !== newIds.length ||
           !orderedIds.every((id, i) => id === newIds[i]);
         orderedIds = newIds;
 
-        // Clear focus if focused reminder no longer exists
         if (focusedId && !newIds.includes(focusedId)) {
           focusedId = null;
         }
 
-        render(idsChanged);  // Force recreate if reminders added/removed
+        render(idsChanged);
       }
 
-      // Filter to only due reminders
       function filterDueReminders(allReminders) {
         const now = new Date();
         return allReminders.filter(r => {
@@ -994,32 +807,24 @@
         });
       }
 
-      // Fetch reminders directly from Rust backend
       async function fetchReminders() {
         try {
           const allPending = await invoke("get_pending_reminders");
-          console.log("Fetched pending reminders:", allPending.length);
           const dueReminders = filterDueReminders(allPending);
-          console.log("Due reminders:", dueReminders.length);
           updateReminders(dueReminders);
         } catch (e) {
           console.error("Failed to fetch reminders:", e);
         }
       }
 
-      // Listen for updates from main window (for real-time updates after initial load)
       listen("update-reminders", (event) => {
-        console.log("Received update-reminders:", event.payload);
         updateReminders(event.payload.reminders);
       });
 
-      // Listen for refresh signal (after complete/snooze actions)
       listen("refresh-reminders", () => {
-        console.log("Received refresh signal, fetching reminders");
         fetchReminders();
       });
 
-      // Listen for focus events from main window
       listen("focus-reminder", (event) => {
         if (ignoreNextFocusEvent) {
           ignoreNextFocusEvent = false;
@@ -1032,78 +837,34 @@
         }
       });
 
-      // Global mouse events for drag
       document.addEventListener('mousemove', handleDragMove);
       document.addEventListener('mouseup', handleDragEnd);
 
-      // Initial load: fetch reminders directly
       render();
       fetchReminders();
 
-      // Poll every second to catch newly due reminders in real-time
       setInterval(fetchReminders, 1000);
 
-      // Smart reposition - only when monitor config might have changed
+      // Reposition on visibility restore (monitor wake)
+      let wasHidden = false;
       let lastRepositionTime = 0;
-      let repositionCooldown = 2000;  // Minimum 2 seconds between repositions
-      let wasHidden = false;  // Track if we were actually hidden (not just unfocused)
 
-      async function smartReposition(reason) {
-        const now = Date.now();
-
-        // Check cooldown
-        if (now - lastRepositionTime < repositionCooldown) {
-          log(`Reposition skipped (cooldown): ${reason}`, 'warn');
-          return;
-        }
-
-        // Log current window state before reposition
-        const beforeInfo = logWindowInfo();
-
-        log(`Reposition triggered: ${reason}`);
-        lastRepositionTime = now;
-
-        try {
-          await invoke('reposition_reminder_bar');
-          // Log after to see what changed
-          setTimeout(() => {
-            const afterInfo = logWindowInfo();
-            if (beforeInfo.screenX !== afterInfo.screenX || beforeInfo.screenY !== afterInfo.screenY) {
-              log(`Position changed: (${beforeInfo.screenX},${beforeInfo.screenY}) -> (${afterInfo.screenX},${afterInfo.screenY})`);
-            }
-          }, 100);
-        } catch (e) {
-          log('Reposition failed: ' + e, 'error');
-        }
-      }
-
-      // Only reposition when returning from hidden state (monitor sleep, minimized)
-      document.addEventListener('visibilitychange', () => {
+      document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'hidden') {
           wasHidden = true;
-          log('Visibility: hidden');
         } else if (document.visibilityState === 'visible' && wasHidden) {
           wasHidden = false;
-          log('Visibility: restored from hidden');
-          smartReposition('visibility restored');
+          const now = Date.now();
+          if (now - lastRepositionTime > 2000) {
+            lastRepositionTime = now;
+            try {
+              await invoke('reposition_reminder_bar');
+            } catch (e) {
+              console.error('Reposition failed:', e);
+            }
+          }
         }
       });
-
-      // DON'T reposition on every focus - this causes the freeze issue
-      // Only log focus events for debugging
-      window.addEventListener('focus', () => {
-        log('Window focused (no reposition)');
-      });
-
-      window.addEventListener('blur', () => {
-        log('Window blurred');
-      });
-
-      // Log initial position on load
-      setTimeout(() => {
-        log('Initial load complete');
-        logWindowInfo();
-      }, 500);
     </script>
   </body>
 </html>

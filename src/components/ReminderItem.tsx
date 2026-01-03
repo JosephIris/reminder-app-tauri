@@ -8,6 +8,7 @@ interface ReminderItemProps {
   index: number;
   isFocused?: boolean;
   isLeaving?: boolean;
+  isDragging?: boolean;
   isDragOver?: boolean;
   onComplete: (id: number) => void;
   onDelete: (id: number) => void;
@@ -16,6 +17,7 @@ interface ReminderItemProps {
   onFocus?: (id: number | null) => void;
   onDragStart?: (e: React.DragEvent, index: number) => void;
   onDragOver?: (e: React.DragEvent, index: number) => void;
+  onDrop?: (e: React.DragEvent, index: number) => void;
   onDragEnd?: () => void;
 }
 
@@ -31,6 +33,7 @@ export function ReminderItem({
   index,
   isFocused,
   isLeaving,
+  isDragging,
   isDragOver,
   onComplete,
   onDelete,
@@ -39,6 +42,7 @@ export function ReminderItem({
   onFocus,
   onDragStart,
   onDragOver,
+  onDrop,
   onDragEnd,
 }: ReminderItemProps) {
   const [isHovered, setIsHovered] = useState(false);
@@ -64,7 +68,7 @@ export function ReminderItem({
     <div
       ref={itemRef}
       draggable
-      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${urgency === "urgent" ? "pulse-urgent" : ""} ${isDragOver ? "drag-over" : ""}`}
+      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${urgency === "urgent" ? "pulse-urgent" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onDoubleClick={() => onEdit(reminder)}
@@ -74,6 +78,7 @@ export function ReminderItem({
         e.preventDefault();
         onDragOver?.(e, index);
       }}
+      onDrop={(e) => onDrop?.(e, index)}
       onDragEnd={onDragEnd}
     >
       <div className="reminder-item-inner">
