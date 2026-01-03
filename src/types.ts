@@ -10,6 +10,7 @@ export interface Reminder {
   is_snoozed: boolean;
   original_due_time?: string; // ISO string
   completed_at?: string; // ISO string
+  sort_order?: number;
 }
 
 export interface ReminderStore {

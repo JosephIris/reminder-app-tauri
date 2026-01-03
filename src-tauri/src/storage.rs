@@ -513,7 +513,16 @@ impl Storage {
                 reminder.sort_order = index as i64;
             }
         }
-        self.save()
+        // Only save locally for instant response - cloud sync happens in background
+        self.save_local()
+    }
+
+    /// Sync current state to cloud (call after local operations that should sync)
+    pub fn sync_to_cloud(&mut self) -> Result<(), String> {
+        if self.use_drive {
+            self.save_to_drive()?;
+        }
+        Ok(())
     }
 
     /// Check if OAuth credentials are configured

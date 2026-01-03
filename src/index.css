@@ -67,3 +67,12 @@ html, body, #root {
   border-radius: 12px;
   overflow: hidden;
 }
+
+/* Disable hover effects during drag operations */
+body.dragging-active .reminder-item-wrapper:hover .reminder-item-inner {
+  background: #262626;
+}
+
+body.dragging-active * {
+  cursor: grabbing !important;
+}

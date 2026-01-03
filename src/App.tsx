@@ -16,6 +16,7 @@ import { EditDialog } from "./components/EditDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ToastContainer } from "./components/Toast";
 import { useReminders } from "./hooks/useReminders";
+import { useDragReorder } from "./hooks/useDragReorder";
 import type { Reminder } from "./types";
 
 function App() {
@@ -41,8 +42,6 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState<{ version: string; download: () => Promise<void> } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Track if bar is currently shown
@@ -51,54 +50,31 @@ function App() {
   // Track if we're the source of the focus event (to avoid processing our own emit)
   const isLocalFocusRef = useRef(false);
 
+  // Mouse-based drag reorder (works better in Tauri webview than HTML5 drag and drop)
+  const handleReorder = useCallback(async (fromIndex: number, toIndex: number) => {
+    const newPending = [...pending];
+    const [draggedItem] = newPending.splice(fromIndex, 1);
+    newPending.splice(toIndex, 0, draggedItem);
+    const orderedIds = newPending.map(r => r.id);
+    await reorderReminders(orderedIds);
+  }, [pending, reorderReminders]);
+
+  const { dragState, handleMouseDown, justFinishedDrag } = useDragReorder({
+    onReorder: handleReorder,
+    itemSelector: '.reminder-item-wrapper',
+    containerSelector: '.reminder-list-container',
+  });
+
   // Handle focus from list - emit to bar
   const handleFocusReminder = useCallback(async (id: number | null) => {
+    // Don't trigger focus if we just finished dragging
+    if (justFinishedDrag.current) return;
     setFocusedReminderId(id);
     // Mark that we're emitting, so we ignore our own event
     isLocalFocusRef.current = true;
     // Emit to bar so it syncs
     await emit("focus-reminder", { id });
-  }, []);
-
-  // Drag and drop handlers
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    // Add some drag image styling
-    if (e.target instanceof HTMLElement) {
-      e.dataTransfer.setDragImage(e.target, 0, 0);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault(); // Required to allow drop
-    e.dataTransfer.dropEffect = 'move';
-    if (draggedIndex !== null) {
-      setDragOverIndex(index);
-    }
-  }, [draggedIndex]);
-
-  const handleDrop = useCallback(async (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    if (draggedIndex !== null && draggedIndex !== dropIndex) {
-      // Calculate new order
-      const newPending = [...pending];
-      const [draggedItem] = newPending.splice(draggedIndex, 1);
-      newPending.splice(dropIndex, 0, draggedItem);
-
-      // Get ordered IDs and save
-      const orderedIds = newPending.map(r => r.id);
-      await reorderReminders(orderedIds);
-    }
-
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  }, [draggedIndex, pending, reorderReminders]);
-
-  const handleDragEnd = useCallback(() => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  }, []);
+  }, [justFinishedDrag]);
 
   // Check for due reminders every 10 seconds
   useEffect(() => {
@@ -270,7 +246,7 @@ function App() {
         <ReminderInput onAdd={addReminder} syncing={syncing} inputRef={inputRef} />
 
         {/* Pending reminders - px-1 gives room for glow effect */}
-        <div className="flex-1 overflow-y-auto mt-4 space-y-2 px-1">
+        <div className="flex-1 overflow-y-auto mt-4 space-y-2 px-1 reminder-list-container">
           {pending.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-4xl mb-3 opacity-50">📭</div>
@@ -289,20 +265,16 @@ function App() {
                 <ReminderItem
                   key={reminder.id}
                   reminder={reminder}
-                  index={index}
                   isFocused={focusedReminderId === reminder.id}
                   isLeaving={leavingIds.has(reminder.id)}
-                  isDragging={draggedIndex === index}
-                  isDragOver={dragOverIndex === index}
+                  isDragging={dragState.draggedIndex === index}
+                  isDragOver={dragState.dropTargetIndex === index}
                   onComplete={completeReminder}
                   onDelete={deleteReminder}
                   onSnooze={snoozeReminder}
                   onEdit={setEditingReminder}
                   onFocus={handleFocusReminder}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  onDragEnd={handleDragEnd}
+                  onMouseDown={(e) => handleMouseDown(e, index)}
                 />
               ))}
             </>

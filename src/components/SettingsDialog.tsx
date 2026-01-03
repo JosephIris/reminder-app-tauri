@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 
 interface ShortcutInputProps {
   onSave: (shortcut: string) => void;
@@ -90,6 +91,7 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
   const [editingShortcut, setEditingShortcut] = useState<"quickAdd" | "showList" | null>(null);
   const [quickAddShortcut, setQuickAddShortcut] = useState("Ctrl+Alt+R");
   const [showListShortcut, setShowListShortcut] = useState("Ctrl+Alt+L");
+  const [appVersion, setAppVersion] = useState<string>("");
 
   // OAuth state
   const [hasCredentials, setHasCredentials] = useState(false);
@@ -104,14 +106,28 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
     invoke("register_shortcuts", { quickAdd, showList }).catch(console.error);
   }, []);
 
-  // Load OAuth status
+  // Load OAuth status and app version
   useEffect(() => {
+    // Load OAuth status with error handling
     invoke<[boolean, boolean]>("get_oauth_status")
       .then(([hasCreds, loggedIn]) => {
         setHasCredentials(hasCreds);
         setIsLoggedIn(loggedIn);
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error("Failed to get OAuth status:", err);
+        // Set safe defaults on error
+        setHasCredentials(false);
+        setIsLoggedIn(false);
+      });
+
+    // Load app version with error handling
+    getVersion()
+      .then(setAppVersion)
+      .catch((err) => {
+        console.error("Failed to get app version:", err);
+        setAppVersion("unknown");
+      });
   }, []);
 
   const handleSaveCredentials = async () => {
@@ -165,10 +181,16 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
   };
 
   useEffect(() => {
-    isEnabled().then((enabled) => {
-      setAutoStart(enabled);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    isEnabled()
+      .then((enabled) => {
+        setAutoStart(enabled);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to check autostart status:", err);
+        setAutoStart(false);
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -423,8 +445,8 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
 
           {/* About */}
           <div className="pt-4 border-t border-dark-600">
-            <p className="text-xs text-gray-500 mb-2">Reminder App v1.1.17</p>
-            <div className="flex items-center gap-2">
+            <p className="text-xs text-gray-500 mb-2">Reminder App v{appVersion || "..."}</p>
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={async () => {
                   if (onCheckForUpdates) {
@@ -442,6 +464,13 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
                 className="px-3 py-1.5 bg-dark-600 hover:bg-dark-500 disabled:bg-dark-700 text-white text-sm rounded-lg transition-colors"
               >
                 {checkingForUpdates ? "Checking..." : "Check for Updates"}
+              </button>
+              <button
+                onClick={() => invoke("open_debug_log").catch(console.error)}
+                className="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 text-gray-400 text-sm rounded-lg transition-colors"
+                title="Open debug log file"
+              >
+                View Log
               </button>
               {updateStatus && (
                 <span className={`text-xs ${updateStatus.includes("Failed") ? "text-red-400" : "text-green-400"}`}>

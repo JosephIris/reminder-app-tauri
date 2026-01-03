@@ -152,6 +152,8 @@
 /* Drag and drop styles */
 .reminder-item-wrapper {
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .reminder-item-wrapper:active {
@@ -174,4 +176,21 @@
 
 .reminder-item-wrapper.drag-over .reminder-item-inner {
   background: rgba(99, 102, 241, 0.15);
+}
+
+/* Drag handle visual indicator on hover */
+.reminder-item-wrapper::before {
+  content: '⋮⋮';
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: transparent;
+  font-size: 10px;
+  letter-spacing: -2px;
+  transition: color 0.15s;
+}
+
+.reminder-item-wrapper:hover::before {
+  color: #666;
 }
