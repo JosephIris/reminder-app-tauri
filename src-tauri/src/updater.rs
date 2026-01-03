@@ -63,39 +63,73 @@ pub fn install_update(download_url: &str) -> Result<(), String> {
     use std::fs;
     use std::io::Write;
 
+    // Log to file for debugging
+    let log_path = env::temp_dir().join("reminder-app-update.log");
+    let log = |msg: &str| {
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            let _ = writeln!(f, "[{}] {}", chrono::Local::now().format("%H:%M:%S"), msg);
+        }
+        println!("{}", msg);
+    };
+
     // Download to temp file
     let temp_dir = env::temp_dir();
     let temp_exe = temp_dir.join("reminder-app-update.exe");
 
-    println!("Downloading update from: {}", download_url);
+    log(&format!("Downloading update from: {}", download_url));
 
     // Use ureq to download (we already have it as a dependency)
+    log("Starting HTTP request...");
     let response = ureq::get(download_url)
         .call()
-        .map_err(|e| format!("Failed to download update: {}", e))?;
+        .map_err(|e| {
+            log(&format!("Download failed: {}", e));
+            format!("Failed to download update: {}", e)
+        })?;
+
+    log(&format!("Response status: {}", response.status()));
 
     // Handle redirects (GitHub uses them for asset downloads)
     let mut reader = response.into_reader();
     let mut bytes = Vec::new();
+    log("Reading response body...");
     std::io::Read::read_to_end(&mut reader, &mut bytes)
-        .map_err(|e| format!("Failed to read update data: {}", e))?;
+        .map_err(|e| {
+            log(&format!("Read failed: {}", e));
+            format!("Failed to read update data: {}", e)
+        })?;
+
+    log(&format!("Downloaded {} bytes", bytes.len()));
 
     // Write to temp file
     let mut file = fs::File::create(&temp_exe)
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        .map_err(|e| {
+            log(&format!("Create temp file failed: {}", e));
+            format!("Failed to create temp file: {}", e)
+        })?;
     file.write_all(&bytes)
-        .map_err(|e| format!("Failed to write update: {}", e))?;
+        .map_err(|e| {
+            log(&format!("Write failed: {}", e));
+            format!("Failed to write update: {}", e)
+        })?;
     drop(file);
 
-    println!("Downloaded {} bytes to {:?}", bytes.len(), temp_exe);
+    log(&format!("Wrote to {:?}", temp_exe));
 
     // Replace the running executable
+    log("Calling self_replace...");
     self_update::self_replace::self_replace(&temp_exe)
-        .map_err(|e| format!("Failed to replace executable: {}", e))?;
+        .map_err(|e| {
+            log(&format!("self_replace failed: {}", e));
+            format!("Failed to replace executable: {}", e)
+        })?;
+
+    log("self_replace succeeded!");
 
     // Clean up temp file
     let _ = fs::remove_file(&temp_exe);
 
+    log("Update complete");
     Ok(())
 }
 

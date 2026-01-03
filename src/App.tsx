@@ -188,11 +188,14 @@ function App() {
           download: async () => {
             setUpdating(true);
             try {
+              console.log("Starting update download from:", update.download_url);
               await invoke("install_update", { downloadUrl: update.download_url });
+              console.log("Update installed, relaunching...");
               // App will restart automatically after self-replace
               await relaunch();
             } catch (e) {
               console.error("Update failed:", e);
+              alert(`Update failed: ${e}`);
               setUpdating(false);
             }
           },
