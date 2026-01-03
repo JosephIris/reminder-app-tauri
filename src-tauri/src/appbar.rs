@@ -13,15 +13,21 @@ use windows::{
 
 #[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::Mutex;
 
 #[cfg(windows)]
 static APPBAR_REGISTERED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
+static APPBAR_MUTEX: Mutex<()> = Mutex::new(());
+
+#[cfg(windows)]
 const APPBAR_CALLBACK: u32 = WM_USER + 1;
 
-/// Write debug info to a log file in the user's temp directory (only in debug builds)
-#[cfg(all(windows, debug_assertions))]
+/// Write debug info to a log file in the user's temp directory
+/// Log file is at: %TEMP%\reminder-app-debug.log
+#[cfg(windows)]
 fn log_debug(msg: &str) {
     use std::io::Write;
     if let Some(temp_dir) = std::env::var_os("TEMP") {
@@ -37,9 +43,18 @@ fn log_debug(msg: &str) {
     }
 }
 
-/// No-op in release builds
-#[cfg(all(windows, not(debug_assertions)))]
-fn log_debug(_msg: &str) {}
+/// Get the debug log file path
+#[cfg(windows)]
+pub fn get_log_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("TEMP").map(|temp_dir| {
+        std::path::Path::new(&temp_dir).join("reminder-app-debug.log")
+    })
+}
+
+#[cfg(not(windows))]
+pub fn get_log_path() -> Option<std::path::PathBuf> {
+    None
+}
 
 /// Register a window as an appbar docked at the bottom of the screen.
 /// bar_height is in logical pixels (will be converted to physical for Windows API).
@@ -52,7 +67,24 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
 
     const DEFAULT_DPI: u32 = 96;  // Standard Windows DPI (100% scaling)
 
-    log_debug("=== register_appbar called ===");
+    // Acquire mutex to prevent concurrent registration attempts
+    let _guard = APPBAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Use compare_exchange to atomically check and set the flag
+    // This ensures only ONE thread can proceed even if they arrive at the same instant
+    let was_registered = APPBAR_REGISTERED.compare_exchange(
+        false,  // expected: not registered
+        true,   // set to: registered
+        Ordering::SeqCst,
+        Ordering::SeqCst
+    );
+
+    if was_registered.is_err() {
+        log_debug("=== register_appbar called but already registered (atomic check), skipping ===");
+        return Err("AppBar already registered".to_string());
+    }
+
+    log_debug("=== register_appbar called (won atomic race) ===");
 
     let hwnd = HWND(hwnd as *mut _);
 
@@ -66,7 +98,7 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     log_debug(&format!("DPI: {}, scale: {:.3}, logical bar height: {}, physical: {}",
              dpi, scale, bar_height, physical_bar_height));
 
-    // Get monitor info for screen bounds
+    // Get monitor info for the monitor containing the taskbar (primary monitor)
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY) };
     let mut monitor_info = MONITORINFO {
         cbSize: std::mem::size_of::<MONITORINFO>() as u32,
@@ -79,12 +111,17 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
         return Err("Failed to get monitor info".to_string());
     }
 
+    // Use rcWork (work area) instead of rcMonitor (full monitor area)
+    // rcWork excludes the taskbar, so we can position our bar correctly
+    let work_area = monitor_info.rcWork;
     let monitor_area = monitor_info.rcMonitor;
 
     log_debug(&format!("Monitor area: left={}, top={}, right={}, bottom={}",
              monitor_area.left, monitor_area.top, monitor_area.right, monitor_area.bottom));
+    log_debug(&format!("Work area: left={}, top={}, right={}, bottom={}",
+             work_area.left, work_area.top, work_area.right, work_area.bottom));
 
-    // Query the taskbar position directly - this is more reliable than work area
+    // Query the taskbar position directly for vertical positioning
     let mut taskbar_abd = APPBARDATA {
         cbSize: std::mem::size_of::<APPBARDATA>() as u32,
         ..Default::default()
@@ -99,15 +136,24 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     let bar_bottom = taskbar_abd.rc.top;
     let bar_top = bar_bottom - physical_bar_height;
 
+    // IMPORTANT: Use work_area.left/right for horizontal bounds, NOT monitor_area
+    // On multi-monitor setups, the work area correctly reflects the usable space
+    // on this specific monitor, while monitor_area might have incorrect bounds
+    // due to virtual screen coordinate issues
+    let bar_left = work_area.left;
+    let bar_right = work_area.right;
+
+    log_debug(&format!("Using horizontal bounds from work_area: left={}, right={}", bar_left, bar_right));
+
     let mut abd = APPBARDATA {
         cbSize: std::mem::size_of::<APPBARDATA>() as u32,
         hWnd: hwnd,
         uCallbackMessage: APPBAR_CALLBACK,
         uEdge: ABE_BOTTOM,
         rc: RECT {
-            left: monitor_area.left,
+            left: bar_left,
             top: bar_top,
-            right: monitor_area.right,
+            right: bar_right,
             bottom: bar_bottom,
         },
         lParam: LPARAM(0),
@@ -120,10 +166,11 @@ pub fn register_appbar(hwnd: isize, bar_height: i32) -> Result<(i32, i32, i32, i
     let result = unsafe { SHAppBarMessage(ABM_NEW, &mut abd) };
     if result == 0 {
         log_debug("ERROR: Failed to register appbar");
+        // Reset flag since registration failed
+        APPBAR_REGISTERED.store(false, Ordering::SeqCst);
         return Err("Failed to register appbar".to_string());
     }
-
-    APPBAR_REGISTERED.store(true, Ordering::SeqCst);
+    // Note: APPBAR_REGISTERED was already set to true atomically at function start
 
     // Query the position to see what space is available
     unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut abd) };

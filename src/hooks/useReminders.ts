@@ -197,13 +197,31 @@ export function useReminders() {
   }, [refresh]);
 
   const reorderReminders = useCallback(async (orderedIds: number[]) => {
+    // Optimistic update: reorder locally FIRST for instant feedback
+    setPending(prev => {
+      const idToReminder = new Map(prev.map(r => [r.id, r]));
+      const reordered: Reminder[] = [];
+      for (const id of orderedIds) {
+        const reminder = idToReminder.get(id);
+        if (reminder) {
+          reordered.push({ ...reminder, sort_order: reordered.length });
+        }
+      }
+      return reordered;
+    });
+
+    // Persist locally (fast), then sync to cloud in background
     try {
       await invoke("reorder_reminders", { orderedIds });
-      await refresh();
       await emit("refresh-reminders");
+      // Cloud sync in background - don't await
+      invoke("sync_to_cloud_background").catch((e) => {
+        console.log("Background cloud sync skipped:", e);
+      });
     } catch (error) {
       console.error("Failed to reorder reminders:", error);
-      showToast("Failed to reorder", "error");
+      showToast("Failed to save order", "error");
+      refresh();
     }
   }, [refresh]);
 

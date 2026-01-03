@@ -17,6 +17,117 @@ use tauri::{
 use storage::{Storage, OAuthCredentials};
 use reminder::Reminder;
 
+/// Monitor Windows display changes and power events to reposition the reminder bar
+/// Listens for WM_DISPLAYCHANGE (resolution/monitor changes) and WM_POWERBROADCAST (resume from sleep)
+#[cfg(windows)]
+fn monitor_display_changes(app_handle: tauri::AppHandle) {
+    use std::time::{Duration, Instant};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
+        TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPED,
+        WM_DISPLAYCHANGE, WM_POWERBROADCAST,
+    };
+
+    // Track last reposition time to debounce rapid events
+    static LAST_REPOSITION: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+
+    // Store app handle globally for the window proc
+    static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+    let _ = APP_HANDLE.set(app_handle);
+
+    unsafe extern "system" fn window_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        match msg {
+            WM_DISPLAYCHANGE | WM_POWERBROADCAST => {
+                println!("Display/power event detected (msg={}), will reposition bar", msg);
+
+                // Debounce: only reposition if 2+ seconds since last reposition
+                let should_reposition = {
+                    let mut last = LAST_REPOSITION.lock().unwrap();
+                    let now = Instant::now();
+                    if last.map_or(true, |t| now.duration_since(t) > Duration::from_secs(2)) {
+                        *last = Some(now);
+                        true
+                    } else {
+                        false
+                    }
+                };
+
+                if should_reposition {
+                    if let Some(app) = APP_HANDLE.get() {
+                        let app = app.clone();
+                        // Delay and retry multiple times to handle monitor wake settling
+                        std::thread::spawn(move || {
+                            // Retry at increasing intervals: 500ms, 1.5s, 3s
+                            let delays = [500, 1500, 3000];
+                            for (i, delay_ms) in delays.iter().enumerate() {
+                                std::thread::sleep(Duration::from_millis(*delay_ms));
+                                println!("Repositioning bar attempt {} after {}ms", i + 1, delay_ms);
+                                let app_clone = app.clone();
+                                tauri::async_runtime::block_on(async {
+                                    let _ = reposition_reminder_bar(app_clone).await;
+                                });
+                            }
+                        });
+                    }
+                }
+
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+
+    // Create a hidden message-only window to receive system messages
+    unsafe {
+        let class_name: Vec<u16> = "ReminderAppDisplayMonitor\0".encode_utf16().collect();
+
+        let wc = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(window_proc),
+            hInstance: windows::Win32::Foundation::HINSTANCE::default(),
+            lpszClassName: windows::core::PCWSTR(class_name.as_ptr()),
+            ..Default::default()
+        };
+
+        if RegisterClassW(&wc) == 0 {
+            println!("Failed to register display monitor window class");
+            return;
+        }
+
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            windows::core::PCWSTR(class_name.as_ptr()),
+            windows::core::PCWSTR::null(),
+            WS_OVERLAPPED,
+            0, 0, 0, 0,
+            HWND::default(),
+            None,
+            None,
+            None,
+        );
+
+        if hwnd.is_err() || hwnd.as_ref().unwrap().is_invalid() {
+            println!("Failed to create display monitor window");
+            return;
+        }
+
+        println!("Display change monitoring started");
+
+        // Message loop
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).into() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
 // Counter for notification window positioning
 static NOTIFICATION_COUNT: AtomicU32 = AtomicU32::new(0);
 
@@ -95,6 +206,12 @@ fn snooze_reminder(state: tauri::State<AppState>, id: i64, minutes: i64) -> Resu
 fn reorder_reminders(state: tauri::State<AppState>, ordered_ids: Vec<i64>) -> Result<(), String> {
     let mut storage = state.lock_storage();
     storage.reorder_reminders(ordered_ids)
+}
+
+#[tauri::command]
+async fn sync_to_cloud_background(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut storage = state.lock_storage();
+    storage.sync_to_cloud()
 }
 
 #[tauri::command]
@@ -365,8 +482,13 @@ async fn register_shortcuts(app: tauri::AppHandle, quick_add: String, show_list:
     Ok(())
 }
 
+// Guard to prevent concurrent bar creation
+static BAR_CREATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[tauri::command]
 async fn show_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
     let label = "reminder-bar";
 
     // If bar already exists, just show it
@@ -375,14 +497,29 @@ async fn show_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // Atomic guard to prevent concurrent creation attempts
+    if BAR_CREATING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        println!("show_reminder_bar: already creating, skipping duplicate call");
+        return Ok(());
+    }
+
+    // Ensure we reset the flag when done (success or failure)
+    struct ResetGuard;
+    impl Drop for ResetGuard {
+        fn drop(&mut self) {
+            BAR_CREATING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let _reset_guard = ResetGuard;
+
     // Get work area from Windows API (this gives us the area excluding taskbar)
     let (work_x, work_y, work_width, work_height) = appbar::get_work_area()
         .unwrap_or((0, 0, 1920, 1080));
 
     println!("Work area: x={}, y={}, w={}, h={}", work_x, work_y, work_width, work_height);
 
-    // Bar dimensions - increased to accommodate focused task with glow effects
-    let bar_height = 68;
+    // Bar dimensions - needs to fit: card (44px) + wrapper padding (4px) + vertical padding (12px) = 60px
+    let bar_height = 60;
 
     // Use 98% of work area width, centered
     let bar_width = (work_width as f64 * 0.98) as i32;
@@ -421,14 +558,33 @@ async fn show_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
             match appbar::register_appbar(hwnd_val, bar_height) {
                 Ok((appbar_x, appbar_y, appbar_w, appbar_h)) => {
                     println!("AppBar registered at: ({}, {}), size: {}x{}", appbar_x, appbar_y, appbar_w, appbar_h);
-                    // Position the window to fill the appbar reserved space
-                    // appbar returns logical pixels, so use Logical positioning
-                    let _ = window.set_position(tauri::Position::Logical(
-                        tauri::LogicalPosition::new(appbar_x as f64, appbar_y as f64)
-                    ));
-                    let _ = window.set_size(tauri::Size::Logical(
-                        tauri::LogicalSize::new(appbar_w as f64, appbar_h as f64)
-                    ));
+
+                    // Use Windows API directly to set exact window position/size
+                    // This bypasses Tauri's size handling which may add padding
+                    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER, SWP_NOACTIVATE, HWND_TOP};
+                    use windows::Win32::Foundation::HWND;
+
+                    let hwnd_win = HWND(hwnd_val as *mut _);
+                    let result = unsafe {
+                        SetWindowPos(
+                            hwnd_win,
+                            HWND_TOP,
+                            appbar_x,
+                            appbar_y,
+                            appbar_w,
+                            appbar_h,
+                            SWP_NOZORDER | SWP_NOACTIVATE
+                        )
+                    };
+                    println!("SetWindowPos result: {:?}", result);
+
+                    // Verify actual position after setting
+                    if let Ok(actual_pos) = window.outer_position() {
+                        println!("Actual window position after set: {:?}", actual_pos);
+                    }
+                    if let Ok(actual_size) = window.outer_size() {
+                        println!("Actual window size after set: {:?}", actual_size);
+                    }
                 }
                 Err(e) => {
                     println!("Failed to register appbar: {}, falling back to always-on-top", e);
@@ -468,7 +624,7 @@ async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
     {
         if let Ok(hwnd) = window.hwnd() {
             let hwnd_val = hwnd.0 as isize;
-            let bar_height = 68;
+            let bar_height = 60;
 
             // Unregister existing appbar
             appbar::unregister_appbar(hwnd_val);
@@ -476,13 +632,32 @@ async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
             // Re-register with current monitor dimensions
             match appbar::register_appbar(hwnd_val, bar_height) {
                 Ok((appbar_x, appbar_y, appbar_w, appbar_h)) => {
+                    // Sanity check: skip if values look wrong (negative Y or tiny width)
+                    // This can happen when monitor is still waking up
+                    if appbar_y < 0 || appbar_w < 800 || appbar_h <= 0 {
+                        println!("AppBar got invalid values: ({}, {}), size: {}x{} - skipping",
+                            appbar_x, appbar_y, appbar_w, appbar_h);
+                        return Ok(());
+                    }
+
                     println!("AppBar repositioned to: ({}, {}), size: {}x{}", appbar_x, appbar_y, appbar_w, appbar_h);
-                    let _ = window.set_position(tauri::Position::Logical(
-                        tauri::LogicalPosition::new(appbar_x as f64, appbar_y as f64)
-                    ));
-                    let _ = window.set_size(tauri::Size::Logical(
-                        tauri::LogicalSize::new(appbar_w as f64, appbar_h as f64)
-                    ));
+
+                    // Use Windows API directly to set exact window position/size
+                    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER, SWP_NOACTIVATE, HWND_TOP};
+                    use windows::Win32::Foundation::HWND;
+
+                    let hwnd_win = HWND(hwnd_val as *mut _);
+                    let _ = unsafe {
+                        SetWindowPos(
+                            hwnd_win,
+                            HWND_TOP,
+                            appbar_x,
+                            appbar_y,
+                            appbar_w,
+                            appbar_h,
+                            SWP_NOZORDER | SWP_NOACTIVATE
+                        )
+                    };
                 }
                 Err(e) => {
                     println!("Failed to reposition appbar: {}, falling back to always-on-top", e);
@@ -513,6 +688,19 @@ async fn install_update(download_url: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("Update task failed: {}", e))?
+}
+
+#[tauri::command]
+fn get_debug_log_path() -> Option<String> {
+    appbar::get_log_path().map(|p| p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn open_debug_log() -> Result<(), String> {
+    if let Some(path) = appbar::get_log_path() {
+        open::that(&path).map_err(|e| format!("Failed to open log file: {}", e))?;
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -645,6 +833,15 @@ pub fn run() {
                 // If --startup, window stays hidden (minimized to tray)
             }
 
+            // Set up display change monitoring (Windows)
+            #[cfg(windows)]
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    monitor_display_changes(app_handle);
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -657,6 +854,7 @@ pub fn run() {
             uncomplete_reminder,
             snooze_reminder,
             reorder_reminders,
+            sync_to_cloud_background,
             refresh_from_cloud,
             sync_on_startup,
             show_notification_window,
@@ -675,6 +873,8 @@ pub fn run() {
             disconnect_drive,
             check_for_update,
             install_update,
+            get_debug_log_path,
+            open_debug_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
