@@ -343,6 +343,124 @@
         padding: 0 8px;
       }
 
+      /* Debug panel */
+      .debug-panel {
+        position: fixed;
+        top: 4px;
+        right: 4px;
+        background: rgba(0, 0, 0, 0.95);
+        border: 1px solid #404040;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 10px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        color: #a1a1aa;
+        width: 380px;
+        max-height: 250px;
+        overflow-y: auto;
+        z-index: 9999;
+        display: none;
+      }
+
+      .debug-panel.visible {
+        display: block;
+      }
+
+      .debug-panel .debug-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #333;
+      }
+
+      .debug-panel .debug-title {
+        color: #fafafa;
+        font-weight: 600;
+        font-size: 11px;
+      }
+
+      .debug-panel .debug-btns {
+        display: flex;
+        gap: 4px;
+      }
+
+      .debug-panel .debug-btn {
+        background: #333;
+        border: none;
+        color: #a1a1aa;
+        padding: 3px 8px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 9px;
+      }
+
+      .debug-panel .debug-btn:hover {
+        background: #404040;
+        color: #fafafa;
+      }
+
+      .debug-panel .debug-btn.copy-btn:hover {
+        background: #6366f1;
+      }
+
+      .debug-panel .debug-log {
+        white-space: pre-wrap;
+        word-break: break-all;
+        line-height: 1.4;
+      }
+
+      .debug-panel .log-entry {
+        margin: 2px 0;
+        padding: 2px 0;
+        border-bottom: 1px solid #222;
+      }
+
+      .debug-panel .log-time {
+        color: #6366f1;
+        margin-right: 6px;
+      }
+
+      .debug-panel .log-info {
+        color: #22c55e;
+      }
+
+      .debug-panel .log-warn {
+        color: #f59e0b;
+      }
+
+      .debug-panel .log-error {
+        color: #ef4444;
+      }
+
+      .debug-panel .log-position {
+        color: #06b6d4;
+      }
+
+      .debug-toggle {
+        position: fixed;
+        top: 4px;
+        right: 4px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 1px solid #333;
+        color: #6366f1;
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        z-index: 9998;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .debug-toggle:hover {
+        background: #333;
+        color: #fafafa;
+      }
+
       /* Tooltip styles - compact to fit in bar */
       .tooltip {
         position: fixed;
@@ -374,6 +492,17 @@
     </style>
   </head>
   <body>
+    <button class="debug-toggle" id="debug-toggle" title="Toggle Debug Panel">🔧</button>
+    <div class="debug-panel" id="debug-panel">
+      <div class="debug-header">
+        <span class="debug-title">Debug Log</span>
+        <div class="debug-btns">
+          <button class="debug-btn" id="debug-clear">Clear</button>
+          <button class="debug-btn copy-btn" id="debug-copy">📋 Copy</button>
+        </div>
+      </div>
+      <div class="debug-log" id="debug-log"></div>
+    </div>
     <div class="bar-container" id="bar-container">
       <div class="empty-state">No reminders due</div>
     </div>
@@ -381,6 +510,93 @@
     <script type="module">
       const { invoke } = window.__TAURI__.core;
       const { listen, emit } = window.__TAURI__.event;
+
+      // ========== DEBUG LOGGING SYSTEM ==========
+      const debugLog = [];
+      const MAX_LOG_ENTRIES = 100;
+      let debugPanelVisible = false;
+      let lastWindowPosition = null;  // Track window position to detect actual changes
+
+      function formatLogTime() {
+        const now = new Date();
+        return now.toLocaleTimeString('en-US', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      }
+
+      function log(message, type = 'info') {
+        const entry = { time: formatLogTime(), message, type };
+        debugLog.push(entry);
+        if (debugLog.length > MAX_LOG_ENTRIES) {
+          debugLog.shift();
+        }
+        updateDebugPanel();
+
+        // Also log to console for dev tools
+        const prefix = `[BAR ${entry.time}]`;
+        if (type === 'error') console.error(prefix, message);
+        else if (type === 'warn') console.warn(prefix, message);
+        else console.log(prefix, message);
+      }
+
+      function logPosition(label, data) {
+        log(`${label}: ${JSON.stringify(data)}`, 'position');
+      }
+
+      function updateDebugPanel() {
+        const logEl = document.getElementById('debug-log');
+        if (!logEl) return;
+
+        logEl.innerHTML = debugLog.map(entry => {
+          const typeClass = entry.type === 'error' ? 'log-error' :
+                           entry.type === 'warn' ? 'log-warn' :
+                           entry.type === 'position' ? 'log-position' :
+                           'log-info';
+          return `<div class="log-entry"><span class="log-time">${entry.time}</span><span class="${typeClass}">${entry.message}</span></div>`;
+        }).join('');
+
+        // Auto-scroll to bottom
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function getLogText() {
+        return debugLog.map(e => `[${e.time}] [${e.type.toUpperCase()}] ${e.message}`).join('\n');
+      }
+
+      // Setup debug panel controls
+      document.getElementById('debug-toggle').addEventListener('click', () => {
+        debugPanelVisible = !debugPanelVisible;
+        document.getElementById('debug-panel').classList.toggle('visible', debugPanelVisible);
+      });
+
+      document.getElementById('debug-clear').addEventListener('click', () => {
+        debugLog.length = 0;
+        updateDebugPanel();
+        log('Log cleared');
+      });
+
+      document.getElementById('debug-copy').addEventListener('click', async () => {
+        const text = getLogText();
+        try {
+          await navigator.clipboard.writeText(text);
+          log('Log copied to clipboard!', 'info');
+        } catch (e) {
+          log('Failed to copy: ' + e.message, 'error');
+        }
+      });
+
+      // Log initial window info
+      function logWindowInfo() {
+        const info = {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          screenX: window.screenX,
+          screenY: window.screenY,
+          devicePixelRatio: window.devicePixelRatio
+        };
+        logPosition('Window', info);
+        return info;
+      }
+
+      // ========== END DEBUG LOGGING ==========
 
       let reminders = [];
       let orderedIds = [];
@@ -397,7 +613,7 @@
       let placeholderEl = null;
       let dropTargetIndex = -1;
 
-      console.log("Reminder bar script loaded");
+      log("Reminder bar script loaded");
 
       // Create tooltip element
       function createTooltip() {
@@ -827,23 +1043,67 @@
       // Poll every second to catch newly due reminders in real-time
       setInterval(fetchReminders, 1000);
 
-      // Reposition bar when visibility changes (e.g., after monitor sleep/wake)
+      // Smart reposition - only when monitor config might have changed
+      let lastRepositionTime = 0;
+      let repositionCooldown = 2000;  // Minimum 2 seconds between repositions
+      let wasHidden = false;  // Track if we were actually hidden (not just unfocused)
+
+      async function smartReposition(reason) {
+        const now = Date.now();
+
+        // Check cooldown
+        if (now - lastRepositionTime < repositionCooldown) {
+          log(`Reposition skipped (cooldown): ${reason}`, 'warn');
+          return;
+        }
+
+        // Log current window state before reposition
+        const beforeInfo = logWindowInfo();
+
+        log(`Reposition triggered: ${reason}`);
+        lastRepositionTime = now;
+
+        try {
+          await invoke('reposition_reminder_bar');
+          // Log after to see what changed
+          setTimeout(() => {
+            const afterInfo = logWindowInfo();
+            if (beforeInfo.screenX !== afterInfo.screenX || beforeInfo.screenY !== afterInfo.screenY) {
+              log(`Position changed: (${beforeInfo.screenX},${beforeInfo.screenY}) -> (${afterInfo.screenX},${afterInfo.screenY})`);
+            }
+          }, 100);
+        } catch (e) {
+          log('Reposition failed: ' + e, 'error');
+        }
+      }
+
+      // Only reposition when returning from hidden state (monitor sleep, minimized)
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          console.log("Bar visibility restored, repositioning...");
-          invoke('reposition_reminder_bar').catch(e => {
-            console.error("Failed to reposition bar:", e);
-          });
+        if (document.visibilityState === 'hidden') {
+          wasHidden = true;
+          log('Visibility: hidden');
+        } else if (document.visibilityState === 'visible' && wasHidden) {
+          wasHidden = false;
+          log('Visibility: restored from hidden');
+          smartReposition('visibility restored');
         }
       });
 
-      // Also reposition on window focus (handles some edge cases)
+      // DON'T reposition on every focus - this causes the freeze issue
+      // Only log focus events for debugging
       window.addEventListener('focus', () => {
-        console.log("Bar focused, repositioning...");
-        invoke('reposition_reminder_bar').catch(e => {
-          console.error("Failed to reposition bar:", e);
-        });
+        log('Window focused (no reposition)');
       });
+
+      window.addEventListener('blur', () => {
+        log('Window blurred');
+      });
+
+      // Log initial position on load
+      setTimeout(() => {
+        log('Initial load complete');
+        logWindowInfo();
+      }, 500);
     </script>
   </body>
 </html>
