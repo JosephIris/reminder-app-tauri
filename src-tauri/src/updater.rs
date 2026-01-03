@@ -62,6 +62,7 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
 pub fn install_update(download_url: &str) -> Result<(), String> {
     use std::fs;
     use std::io::Write;
+    use std::process::Command;
 
     // Log to file for debugging
     let log_path = env::temp_dir().join("reminder-app-update.log");
@@ -116,20 +117,58 @@ pub fn install_update(download_url: &str) -> Result<(), String> {
 
     log(&format!("Wrote to {:?}", temp_exe));
 
-    // Replace the running executable
-    log("Calling self_replace...");
-    self_update::self_replace::self_replace(&temp_exe)
-        .map_err(|e| {
-            log(&format!("self_replace failed: {}", e));
-            format!("Failed to replace executable: {}", e)
-        })?;
+    // Get the current executable path
+    let current_exe = env::current_exe()
+        .map_err(|e| format!("Failed to get current exe path: {}", e))?;
 
-    log("self_replace succeeded!");
+    log(&format!("Current exe: {:?}", current_exe));
 
-    // Clean up temp file
-    let _ = fs::remove_file(&temp_exe);
+    // Create a PowerShell script to replace the exe after this process exits
+    let update_script = temp_dir.join("reminder-app-updater.ps1");
+    let script_content = format!(
+        r#"
+# Wait for the old process to exit
+Start-Sleep -Milliseconds 500
+$maxRetries = 20
+$retryCount = 0
+while ($retryCount -lt $maxRetries) {{
+    try {{
+        # Try to replace the executable
+        Copy-Item -Path "{}" -Destination "{}" -Force -ErrorAction Stop
+        break
+    }} catch {{
+        $retryCount++
+        Start-Sleep -Milliseconds 250
+    }}
+}}
+# Start the new version
+Start-Process -FilePath "{}"
+# Clean up
+Remove-Item -Path "{}" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+"#,
+        temp_exe.display(),
+        current_exe.display(),
+        current_exe.display(),
+        temp_exe.display()
+    );
 
-    log("Update complete");
+    fs::write(&update_script, &script_content)
+        .map_err(|e| format!("Failed to write update script: {}", e))?;
+
+    log(&format!("Created update script: {:?}", update_script));
+
+    // Launch the PowerShell script detached
+    Command::new("powershell")
+        .args([
+            "-ExecutionPolicy", "Bypass",
+            "-WindowStyle", "Hidden",
+            "-File", &update_script.to_string_lossy(),
+        ])
+        .spawn()
+        .map_err(|e| format!("Failed to launch update script: {}", e))?;
+
+    log("Update script launched, app will restart shortly");
     Ok(())
 }
 

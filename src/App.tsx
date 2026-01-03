@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { exit } from "@tauri-apps/plugin-process";
 
 interface UpdateInfo {
   version: string;
@@ -190,9 +190,9 @@ function App() {
             try {
               console.log("Starting update download from:", update.download_url);
               await invoke("install_update", { downloadUrl: update.download_url });
-              console.log("Update installed, relaunching...");
-              // App will restart automatically after self-replace
-              await relaunch();
+              console.log("Update installed, exiting for update script to replace exe...");
+              // Exit so the PowerShell script can replace the exe and restart
+              await exit(0);
             } catch (e) {
               console.error("Update failed:", e);
               alert(`Update failed: ${e}`);

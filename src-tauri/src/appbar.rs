@@ -211,18 +211,6 @@ pub fn get_work_area() -> Result<(i32, i32, i32, i32), String> {
     Ok((x, y, width, height))
 }
 
-/// Get the primary monitor's full screen bounds (ignoring work area).
-#[cfg(windows)]
-pub fn get_primary_monitor_bounds() -> Result<(i32, i32, i32, i32), String> {
-    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-
-    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-
-    // Primary monitor always starts at 0,0
-    Ok((0, 0, width, height))
-}
-
 // Non-Windows stubs
 #[cfg(not(windows))]
 pub fn register_appbar(_hwnd: isize, _bar_height: i32) -> Result<(i32, i32, i32, i32), String> {
@@ -234,10 +222,5 @@ pub fn unregister_appbar(_hwnd: isize) {}
 
 #[cfg(not(windows))]
 pub fn get_work_area() -> Result<(i32, i32, i32, i32), String> {
-    Err("Not supported on this platform".to_string())
-}
-
-#[cfg(not(windows))]
-pub fn get_primary_monitor_bounds() -> Result<(i32, i32, i32, i32), String> {
     Err("Not supported on this platform".to_string())
 }
