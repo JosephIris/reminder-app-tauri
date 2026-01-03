@@ -497,12 +497,22 @@ async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn check_for_update() -> Result<Option<updater::UpdateInfo>, String> {
-    updater::check_for_update()
+    // Run the blocking network request in a separate thread
+    tauri::async_runtime::spawn_blocking(|| {
+        updater::check_for_update()
+    })
+    .await
+    .map_err(|e| format!("Update check task failed: {}", e))?
 }
 
 #[tauri::command]
 async fn install_update(download_url: String) -> Result<(), String> {
-    updater::install_update(&download_url)
+    // Run the blocking download/install in a separate thread to avoid freezing UI
+    tauri::async_runtime::spawn_blocking(move || {
+        updater::install_update(&download_url)
+    })
+    .await
+    .map_err(|e| format!("Update task failed: {}", e))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
