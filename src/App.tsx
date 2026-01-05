@@ -248,10 +248,12 @@ function App() {
         {/* Pending reminders - px-1 gives room for glow effect */}
         <div className="flex-1 overflow-y-auto mt-4 space-y-2 px-1 reminder-list-container">
           {pending.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="text-4xl mb-3 opacity-50">📭</div>
-              <p className="text-gray-500 text-sm">No upcoming reminders</p>
-              <p className="text-gray-600 text-xs mt-1">Add one above to get started</p>
+            <div className="text-center py-16 flex flex-col items-center justify-center">
+              <div className="text-5xl mb-4 animate-float">✨</div>
+              <p className="text-gray-400 text-sm font-medium">All clear</p>
+              <p className="text-gray-600 text-xs mt-2 max-w-[200px]">
+                Your mind is free. Add a reminder above when you need one.
+              </p>
             </div>
           ) : (
             <>

@@ -76,3 +76,120 @@ body.dragging-active .reminder-item-wrapper:hover .reminder-item-inner {
 body.dragging-active * {
   cursor: grabbing !important;
 }
+
+/* Strikethrough draw animation */
+@keyframes draw-strikethrough {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.strikethrough-animate {
+  position: relative;
+  text-decoration: none;
+}
+
+.strikethrough-animate::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+  animation: draw-strikethrough 0.4s ease-out forwards;
+}
+
+/* Button micro-interactions */
+@keyframes button-press {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
+@keyframes button-success {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.btn-press:active {
+  animation: button-press 0.15s ease-out;
+}
+
+.btn-success {
+  animation: button-success 0.3s ease-out;
+}
+
+/* Check animation */
+@keyframes check-draw {
+  0% {
+    stroke-dashoffset: 24;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.check-icon {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+}
+
+.check-icon.animate {
+  animation: check-draw 0.3s ease-out forwards;
+}
+
+/* Empty state floating animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Input glow effect */
+@keyframes input-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px 2px rgba(59, 130, 246, 0.15);
+  }
+}
+
+.input-glow:focus {
+  animation: input-glow 2s ease-in-out infinite;
+}
+
+/* Typewriter cursor blink */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typewriter-cursor::after {
+  content: '|';
+  animation: blink 1s step-end infinite;
+  margin-left: 1px;
+  color: #6b7280;
+}
+
+/* Completed item fade */
+.completed-item {
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.completed-item:hover {
+  opacity: 0.7;
+}
