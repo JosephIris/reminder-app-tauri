@@ -613,6 +613,27 @@ async fn hide_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn reset_bar_position(app: tauri::AppHandle) -> Result<(), String> {
+    // If bar exists, close it and recreate it to reset position
+    if let Some(window) = app.get_webview_window("reminder-bar") {
+        #[cfg(windows)]
+        {
+            if let Ok(hwnd) = window.hwnd() {
+                appbar::unregister_appbar(hwnd.0 as isize);
+            }
+        }
+        window.close().map_err(|e| e.to_string())?;
+
+        // Small delay to ensure window is fully closed
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Recreate the bar
+        show_reminder_bar(app).await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
     let window = match app.get_webview_window("reminder-bar") {
         Some(w) => w,
@@ -733,8 +754,9 @@ pub fn run() {
             // Create tray menu
             let show_i = MenuItem::with_id(app, "show", "Show Reminders (Ctrl+Alt+L)", true, None::<&str>)?;
             let quick_i = MenuItem::with_id(app, "quick", "Quick Add (Ctrl+Alt+R)", true, None::<&str>)?;
+            let reset_bar_i = MenuItem::with_id(app, "reset_bar", "Reset Bar Position (Ctrl+Alt+B)", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quick_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&show_i, &quick_i, &reset_bar_i, &quit_i])?;
 
             // Build tray icon
             let _tray = TrayIconBuilder::new()
@@ -754,6 +776,12 @@ pub fn run() {
                             let app = app.clone();
                             tauri::async_runtime::spawn(async move {
                                 let _ = show_quick_add(app).await;
+                            });
+                        }
+                        "reset_bar" => {
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = reset_bar_position(app).await;
                             });
                         }
                         "quit" => {
@@ -781,6 +809,9 @@ pub fn run() {
 
             // Ctrl+Alt+L - Show List (show window without focusing input)
             let show_list_shortcut: Shortcut = "Ctrl+Alt+L".parse().unwrap();
+
+            // Ctrl+Alt+B - Reset Bar Position
+            let reset_bar_shortcut: Shortcut = "Ctrl+Alt+B".parse().unwrap();
 
             let app_handle = app.handle().clone();
             match app.global_shortcut().on_shortcut(quick_add_shortcut, move |_app, shortcut, event| {
@@ -811,7 +842,21 @@ pub fn run() {
                 Err(e) => println!("Failed to register Ctrl+Alt+L: {:?}", e),
             }
 
-            println!("Global shortcuts: Ctrl+Alt+R (quick add), Ctrl+Alt+L (show list)");
+            let app_handle3 = app.handle().clone();
+            match app.global_shortcut().on_shortcut(reset_bar_shortcut, move |_app, shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    println!("Reset bar shortcut triggered: {:?}", shortcut);
+                    let app = app_handle3.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = reset_bar_position(app).await;
+                    });
+                }
+            }) {
+                Ok(_) => println!("Ctrl+Alt+B registered successfully"),
+                Err(e) => println!("Failed to register Ctrl+Alt+B: {:?}", e),
+            }
+
+            println!("Global shortcuts: Ctrl+Alt+R (quick add), Ctrl+Alt+L (show list), Ctrl+Alt+B (reset bar)");
 
             // Handle launch arguments
             let args: Vec<String> = std::env::args().collect();
@@ -862,6 +907,7 @@ pub fn run() {
             show_reminder_bar,
             hide_reminder_bar,
             reposition_reminder_bar,
+            reset_bar_position,
             show_quick_add,
             unregister_shortcuts,
             register_shortcuts,

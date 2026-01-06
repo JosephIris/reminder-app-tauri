@@ -204,14 +204,22 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
   const toggleAutoStart = async () => {
     try {
       if (autoStart) {
+        console.log("Disabling autostart...");
         await disable();
+        console.log("Autostart disabled successfully");
         setAutoStart(false);
       } else {
+        console.log("Enabling autostart...");
         await enable();
+        console.log("Autostart enabled successfully");
         setAutoStart(true);
       }
+      // Verify the change
+      const newStatus = await isEnabled();
+      console.log("Autostart status after toggle:", newStatus);
     } catch (error) {
       console.error("Failed to toggle autostart:", error);
+      alert(`Failed to toggle autostart: ${error}`);
     }
   };
 
@@ -471,6 +479,13 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
                 title="Open debug log file"
               >
                 View Log
+              </button>
+              <button
+                onClick={() => invoke("reset_bar_position").catch(console.error)}
+                className="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 text-gray-400 text-sm rounded-lg transition-colors"
+                title="Reset reminder bar position (Ctrl+Alt+B)"
+              >
+                Reset Bar Position
               </button>
               {updateStatus && (
                 <span className={`text-xs ${updateStatus.includes("Failed") ? "text-red-400" : "text-green-400"}`}>
