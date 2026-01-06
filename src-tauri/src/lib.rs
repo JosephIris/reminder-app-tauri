@@ -615,7 +615,7 @@ async fn hide_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn reset_bar_position(app: tauri::AppHandle) -> Result<(), String> {
     // If bar exists, close it and recreate it to reset position
-    if let Some(window) = app.get_webview_window("reminder-bar") {
+    let had_bar = if let Some(window) = app.get_webview_window("reminder-bar") {
         #[cfg(windows)]
         {
             if let Ok(hwnd) = window.hwnd() {
@@ -623,9 +623,19 @@ async fn reset_bar_position(app: tauri::AppHandle) -> Result<(), String> {
             }
         }
         window.close().map_err(|e| e.to_string())?;
+        true
+    } else {
+        false
+    };
 
-        // Small delay to ensure window is fully closed
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    if had_bar {
+        // Wait for window to be fully destroyed (poll until it's gone)
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if app.get_webview_window("reminder-bar").is_none() {
+                break;
+            }
+        }
 
         // Recreate the bar
         show_reminder_bar(app).await?;
