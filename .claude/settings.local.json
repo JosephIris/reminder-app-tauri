@@ -30,7 +30,9 @@
       "Bash(xxd:*)",
       "Bash(dir:*)",
       "Bash(git -C \"c:\\\\Users\\\\irisy\\\\dev-projects\\\\reminder-app-tauri\" log --oneline -20)",
-      "Bash(del \"c:\\\\Users\\\\irisy\\\\dev-projects\\\\reminder-app-tauri\\\\src\\\\hooks\\\\useScheduler.ts\")"
+      "Bash(del \"c:\\\\Users\\\\irisy\\\\dev-projects\\\\reminder-app-tauri\\\\src\\\\hooks\\\\useScheduler.ts\")",
+      "Bash(git config:*)",
+      "Bash(git pull:*)"
     ]
   }
 }

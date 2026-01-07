@@ -435,6 +435,47 @@
       // Hover state tracking per card
       const hoverTimers = new Map(); // id -> { expandTimer, controlsTimer }
 
+      // Cleanup tracking - prevent memory leaks on window reload
+      let cleanupFns = [];
+      let pollInterval = null;
+      let visibilityHandler = null;
+
+      // Cleanup function - called before window unload
+      function cleanup() {
+        console.log('[BAR] Cleaning up resources...');
+
+        // Clear Tauri event listeners
+        cleanupFns.forEach(fn => {
+          try { fn(); } catch (e) { console.error('[BAR] Cleanup error:', e); }
+        });
+        cleanupFns = [];
+
+        // Clear polling interval
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+
+        // Clear all hover timers
+        hoverTimers.forEach((timers, id) => {
+          clearTimeout(timers.expandTimer);
+          clearTimeout(timers.controlsTimer);
+        });
+        hoverTimers.clear();
+
+        // Remove document event listeners
+        document.removeEventListener('mousemove', handleDragMove);
+        document.removeEventListener('mouseup', handleDragEnd);
+        if (visibilityHandler) {
+          document.removeEventListener('visibilitychange', visibilityHandler);
+        }
+
+        console.log('[BAR] Cleanup complete');
+      }
+
+      // Register cleanup on window unload
+      window.addEventListener('beforeunload', cleanup);
+
       console.log("[BAR] Script loaded");
 
       // Card state configurations (heights fixed, widths are min/max)
@@ -1098,25 +1139,34 @@
         }
       }
 
-      listen("update-reminders", (event) => {
-        updateReminders(event.payload.reminders);
-      });
+      // Setup event listeners with proper cleanup tracking
+      async function setupEventListeners() {
+        // Store unlisten functions for cleanup
+        cleanupFns.push(await listen("update-reminders", (event) => {
+          updateReminders(event.payload.reminders);
+        }));
 
-      listen("refresh-reminders", () => {
-        fetchReminders();
-      });
+        cleanupFns.push(await listen("refresh-reminders", () => {
+          fetchReminders();
+        }));
 
-      listen("focus-reminder", (event) => {
-        if (ignoreNextFocusEvent) {
-          ignoreNextFocusEvent = false;
-          return;
-        }
-        const newFocusId = event.payload.id;
-        if (focusedId !== newFocusId) {
-          focusedId = newFocusId;
-          render();
-        }
-      });
+        cleanupFns.push(await listen("focus-reminder", (event) => {
+          if (ignoreNextFocusEvent) {
+            ignoreNextFocusEvent = false;
+            return;
+          }
+          const newFocusId = event.payload.id;
+          if (focusedId !== newFocusId) {
+            focusedId = newFocusId;
+            render();
+          }
+        }));
+
+        console.log('[BAR] Event listeners registered with cleanup tracking');
+      }
+
+      // Initialize event listeners
+      setupEventListeners();
 
       document.addEventListener('mousemove', handleDragMove);
       document.addEventListener('mouseup', handleDragEnd);
@@ -1124,13 +1174,14 @@
       render();
       fetchReminders();
 
-      setInterval(fetchReminders, 1000);
+      // Poll every 5 seconds (reduced from 1s to prevent IPC saturation)
+      pollInterval = setInterval(fetchReminders, 5000);
 
       // Reposition on visibility restore (monitor wake)
       let wasHidden = false;
       let lastRepositionTime = 0;
 
-      document.addEventListener('visibilitychange', async () => {
+      visibilityHandler = async () => {
         if (document.visibilityState === 'hidden') {
           wasHidden = true;
         } else if (document.visibilityState === 'visible' && wasHidden) {
@@ -1145,7 +1196,8 @@
             }
           }
         }
-      });
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
     </script>
   </body>
 </html>
