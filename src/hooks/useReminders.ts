@@ -181,30 +181,50 @@ export function useReminders() {
   }, [refresh]);
 
   const moveReminder = useCallback(async (id: number, toList: ListType) => {
-    setSyncing(true);
+    // Optimistic update: move locally first for instant feedback
+    setPending(prev => {
+      const reminder = prev.find(r => r.id === id);
+      if (!reminder || reminder.list_type === toList) return prev;
+
+      return prev.map(r => {
+        if (r.id === id) {
+          return { ...r, list_type: toList, sort_order: toList === "actual" ? -1 : 9999 };
+        }
+        return r;
+      });
+    });
+
+    // Persist locally (fast), then sync to cloud in background
     try {
       await invoke("move_reminder", { id, toList });
-      await refresh();
       await emit("refresh-reminders");
+      // Cloud sync in background - don't await
+      invoke("sync_to_cloud_background").catch((e) => {
+        console.log("Background cloud sync skipped:", e);
+      });
     } catch (error) {
       console.error("Failed to move reminder:", error);
       showToast("Failed to move task", "error");
-    } finally {
-      setSyncing(false);
+      refresh(); // Revert on error
     }
   }, [refresh]);
 
   const setUrgency = useCallback(async (id: number, urgency: UrgencyType) => {
-    setSyncing(true);
+    // Optimistic update: update locally first for instant feedback
+    setPending(prev => prev.map(r => r.id === id ? { ...r, urgency } : r));
+
+    // Persist locally (fast), then sync to cloud in background
     try {
       await invoke("set_urgency", { id, urgency });
-      await refresh();
       await emit("refresh-reminders");
+      // Cloud sync in background - don't await
+      invoke("sync_to_cloud_background").catch((e) => {
+        console.log("Background cloud sync skipped:", e);
+      });
     } catch (error) {
       console.error("Failed to set urgency:", error);
       showToast("Failed to update urgency", "error");
-    } finally {
-      setSyncing(false);
+      refresh(); // Revert on error
     }
   }, [refresh]);
 

@@ -592,6 +592,11 @@ impl Storage {
         Ok(())
     }
 
+    /// Save only to local storage (fast) - use when cloud sync will be done separately
+    fn save_local_only(&mut self) -> Result<(), String> {
+        self.save_local()
+    }
+
     fn next_id(&self) -> i64 {
         let max_pending = self.data.pending.iter().map(|r| r.id).max().unwrap_or(0);
         let max_completed = self.data.completed.iter().map(|r| r.id).max().unwrap_or(0);
@@ -767,7 +772,7 @@ impl Storage {
             }
         }
 
-        self.save()?;
+        self.save_local_only()?;
         Ok(())
     }
 
@@ -775,7 +780,7 @@ impl Storage {
     pub fn set_urgency(&mut self, id: i64, urgency: Urgency) -> Result<(), String> {
         if let Some(reminder) = self.data.pending.iter_mut().find(|r| r.id == id) {
             reminder.urgency = urgency;
-            self.save()?;
+            self.save_local_only()?;
         }
         Ok(())
     }

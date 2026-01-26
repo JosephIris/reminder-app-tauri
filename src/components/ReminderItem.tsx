@@ -41,7 +41,9 @@ export function ReminderItem({
   const [isHovered, setIsHovered] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [showUrgencyMenu, setShowUrgencyMenu] = useState(false);
+  const [menuOpenAbove, setMenuOpenAbove] = useState(true);
   const itemRef = useRef<HTMLDivElement>(null);
+  const urgencyButtonRef = useRef<HTMLButtonElement>(null);
   const urgencyMenuRef = useRef<HTMLDivElement>(null);
 
   const urgency = urgencyConfig[reminder.urgency] || urgencyConfig.whenever;
@@ -65,7 +67,11 @@ export function ReminderItem({
   // Close urgency menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (urgencyMenuRef.current && !urgencyMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      // Check if click is outside both the button and the menu
+      const isOutsideButton = urgencyButtonRef.current && !urgencyButtonRef.current.contains(target);
+      const isOutsideMenu = urgencyMenuRef.current && !urgencyMenuRef.current.contains(target);
+      if (isOutsideButton && isOutsideMenu) {
         setShowUrgencyMenu(false);
       }
     };
@@ -83,6 +89,14 @@ export function ReminderItem({
 
   const handleUrgencyClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!showUrgencyMenu && urgencyButtonRef.current) {
+      // Calculate if we should open above or below
+      const rect = urgencyButtonRef.current.getBoundingClientRect();
+      const spaceAbove = rect.top;
+      const menuHeight = 130; // Approximate menu height
+      // Open below if not enough space above
+      setMenuOpenAbove(spaceAbove > menuHeight);
+    }
     setShowUrgencyMenu(!showUrgencyMenu);
   };
 
@@ -116,15 +130,14 @@ export function ReminderItem({
         <p className="flex-1 text-white text-sm truncate">{reminder.message}</p>
 
         {/* Urgency badge - clickable to change */}
-        <div className="relative" ref={urgencyMenuRef}>
-          <button
-            onClick={handleUrgencyClick}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs whitespace-nowrap transition-colors hover:opacity-80 ${urgency.color} ${urgency.bgColor}`}
-            title="Click to change urgency"
-          >
-            <span className="font-medium">{urgency.label}</span>
-          </button>
-        </div>
+        <button
+          ref={urgencyButtonRef}
+          onClick={handleUrgencyClick}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs whitespace-nowrap transition-colors hover:opacity-80 ${urgency.color} ${urgency.bgColor}`}
+          title="Click to change urgency"
+        >
+          <span className="font-medium">{urgency.label}</span>
+        </button>
 
         {/* Actions - show on hover or focus */}
         <div className={`flex items-center gap-1 transition-opacity duration-200 ${isHovered || isFocused ? "opacity-100" : "opacity-0"}`}>
@@ -170,7 +183,10 @@ export function ReminderItem({
 
       {/* Urgency dropdown menu - outside of inner div to avoid overflow clipping */}
       {showUrgencyMenu && (
-        <div className="urgency-dropdown-menu">
+        <div
+          ref={urgencyMenuRef}
+          className={`urgency-dropdown-menu ${menuOpenAbove ? "open-above" : "open-below"}`}
+        >
           {(Object.keys(urgencyConfig) as UrgencyType[]).map((key) => (
             <button
               key={key}
