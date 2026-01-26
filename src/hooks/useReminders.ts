@@ -66,9 +66,15 @@ export function useReminders() {
     setPending(prev => [tempReminder, ...prev]);
     showToast("Task added", "success");
 
-    // Persist in background - NO refresh to avoid overwriting other optimistic updates
-    invoke("add_reminder", { message, urgency, listType })
-      .then(() => emit("refresh-reminders"))
+    // Persist in background - reconcile temp ID with real ID when backend responds
+    invoke<number>("add_reminder", { message, urgency, listType })
+      .then((realId) => {
+        // Replace temp ID with real ID so subsequent operations work
+        setPending(prev => prev.map(r =>
+          r.id === tempId ? { ...r, id: realId } : r
+        ));
+        return emit("refresh-reminders");
+      })
       .then(() => invoke("sync_to_cloud_background"))
       .catch((error) => {
         console.error("Failed to add reminder:", error);

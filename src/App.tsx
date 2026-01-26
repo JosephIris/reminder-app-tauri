@@ -59,6 +59,9 @@ function App() {
   // Track if we're the source of the focus event (to avoid processing our own emit)
   const isLocalFocusRef = useRef(false);
 
+  // Track when window loses focus for smart refresh
+  const lastBlurTimeRef = useRef<number>(0);
+
   // Mouse-based drag reorder for actual list
   const handleReorderActual = useCallback(async (fromIndex: number, toIndex: number) => {
     const newActual = [...actual];
@@ -118,10 +121,26 @@ function App() {
     showBar();
   }, [loading]);
 
-  // Listen for focus events (when window is shown)
+  // Track window blur time
+  useEffect(() => {
+    const unlisten = listen("tauri://blur", () => {
+      lastBlurTimeRef.current = Date.now();
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(console.error);
+    };
+  }, []);
+
+  // Listen for focus events - only refresh if window was unfocused for >30s
+  // This prevents wiping optimistic updates during normal bar interactions
   useEffect(() => {
     const unlisten = listen("tauri://focus", () => {
-      refresh();
+      const timeSinceBlur = Date.now() - lastBlurTimeRef.current;
+      // Only refresh if window was unfocused for more than 30 seconds
+      // This handles multi-device sync while preserving optimistic updates
+      if (lastBlurTimeRef.current > 0 && timeSinceBlur > 30000) {
+        refresh();
+      }
     });
     return () => {
       unlisten.then((fn) => fn()).catch(console.error);
