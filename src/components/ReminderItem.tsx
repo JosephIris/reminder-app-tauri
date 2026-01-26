@@ -118,7 +118,7 @@ export function ReminderItem({
   return (
     <div
       ref={itemRef}
-      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${reminder.urgency === "now" ? "pulse-urgent" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
+      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onDoubleClick={() => onEdit(reminder)}

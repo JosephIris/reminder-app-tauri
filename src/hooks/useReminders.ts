@@ -180,7 +180,7 @@ export function useReminders() {
     }
   }, [refresh]);
 
-  const moveReminder = useCallback(async (id: number, toList: ListType) => {
+  const moveReminder = useCallback((id: number, toList: ListType) => {
     // Optimistic update: move locally first for instant feedback
     setPending(prev => {
       const reminder = prev.find(r => r.id === id);
@@ -194,38 +194,30 @@ export function useReminders() {
       });
     });
 
-    // Persist locally (fast), then sync to cloud in background
-    try {
-      await invoke("move_reminder", { id, toList });
-      await emit("refresh-reminders");
-      // Cloud sync in background - don't await
-      invoke("sync_to_cloud_background").catch((e) => {
-        console.log("Background cloud sync skipped:", e);
+    // Persist in background - fire and forget for snappy UX
+    invoke("move_reminder", { id, toList })
+      .then(() => emit("refresh-reminders"))
+      .then(() => invoke("sync_to_cloud_background"))
+      .catch((error) => {
+        console.error("Failed to move reminder:", error);
+        showToast("Failed to move task", "error");
+        refresh(); // Revert on error
       });
-    } catch (error) {
-      console.error("Failed to move reminder:", error);
-      showToast("Failed to move task", "error");
-      refresh(); // Revert on error
-    }
   }, [refresh]);
 
-  const setUrgency = useCallback(async (id: number, urgency: UrgencyType) => {
+  const setUrgency = useCallback((id: number, urgency: UrgencyType) => {
     // Optimistic update: update locally first for instant feedback
     setPending(prev => prev.map(r => r.id === id ? { ...r, urgency } : r));
 
-    // Persist locally (fast), then sync to cloud in background
-    try {
-      await invoke("set_urgency", { id, urgency });
-      await emit("refresh-reminders");
-      // Cloud sync in background - don't await
-      invoke("sync_to_cloud_background").catch((e) => {
-        console.log("Background cloud sync skipped:", e);
+    // Persist in background - fire and forget for snappy UX
+    invoke("set_urgency", { id, urgency })
+      .then(() => emit("refresh-reminders"))
+      .then(() => invoke("sync_to_cloud_background"))
+      .catch((error) => {
+        console.error("Failed to set urgency:", error);
+        showToast("Failed to update urgency", "error");
+        refresh(); // Revert on error
       });
-    } catch (error) {
-      console.error("Failed to set urgency:", error);
-      showToast("Failed to update urgency", "error");
-      refresh(); // Revert on error
-    }
   }, [refresh]);
 
   const refreshFromCloud = useCallback(async () => {
