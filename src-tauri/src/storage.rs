@@ -1,6 +1,6 @@
-use crate::reminder::Reminder;
+use crate::reminder::{ListType, Reminder, Urgency};
 use crate::urlencoding;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read as IoRead, Write as IoWrite};
@@ -10,11 +10,36 @@ use std::path::PathBuf;
 const OAUTH_REDIRECT_PORT: u16 = 8085;
 // Use drive scope to access all files, not just app-created ones
 const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/drive";
+const MAX_ACTUAL_TASKS: usize = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ReminderStore {
     pending: Vec<Reminder>,
     completed: Vec<Reminder>,
+}
+
+// Legacy data structures for migration
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyReminder {
+    id: i64,
+    message: String,
+    due_time: String,
+    created_at: String,
+    #[serde(default)]
+    recurrence: String,
+    is_completed: bool,
+    #[serde(default)]
+    is_snoozed: bool,
+    original_due_time: Option<String>,
+    completed_at: Option<String>,
+    #[serde(default)]
+    sort_order: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyReminderStore {
+    pending: Vec<LegacyReminder>,
+    completed: Vec<LegacyReminder>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +74,81 @@ pub struct OAuthCredentials {
 
 fn default_folder_id() -> String {
     "1F0qYeAVU_7H73kX9uz-1ZF3i2KS_V-mk".to_string()
+}
+
+/// Migrate a legacy reminder to the new format
+fn migrate_legacy_reminder(legacy: LegacyReminder) -> Reminder {
+    // Determine urgency based on due_time
+    let urgency = if let Ok(due) = DateTime::parse_from_rfc3339(&legacy.due_time) {
+        let now = Utc::now();
+        let due_utc = due.with_timezone(&Utc);
+        let hours_until = (due_utc - now).num_hours();
+
+        if hours_until <= 1 {
+            Urgency::Now
+        } else if hours_until <= 24 {
+            Urgency::Today
+        } else if hours_until <= 168 { // 7 days
+            Urgency::Soon
+        } else {
+            Urgency::Whenever
+        }
+    } else {
+        Urgency::Whenever
+    };
+
+    Reminder {
+        id: legacy.id,
+        message: legacy.message,
+        urgency,
+        list_type: ListType::Actual, // All migrated tasks go to actual
+        created_at: legacy.created_at,
+        is_completed: legacy.is_completed,
+        completed_at: legacy.completed_at,
+        sort_order: legacy.sort_order,
+    }
+}
+
+/// Try to parse content as legacy format and migrate if needed
+fn try_migrate_legacy_data(content: &str, backup_path: Option<&PathBuf>) -> Option<ReminderStore> {
+    // Try to parse as legacy format
+    if let Ok(legacy_store) = serde_json::from_str::<LegacyReminderStore>(content) {
+        // Check if it's actually legacy format (has due_time field)
+        // If the new format parses successfully, don't migrate
+        if serde_json::from_str::<ReminderStore>(content).is_ok() {
+            return None;
+        }
+
+        eprintln!("Detected legacy data format, migrating...");
+
+        // Create backup if path provided
+        if let Some(backup) = backup_path {
+            if let Err(e) = fs::write(backup, content) {
+                eprintln!("Warning: Failed to create backup: {}", e);
+            } else {
+                eprintln!("Created backup at {:?}", backup);
+            }
+        }
+
+        // Migrate reminders
+        let pending: Vec<Reminder> = legacy_store
+            .pending
+            .into_iter()
+            .map(migrate_legacy_reminder)
+            .collect();
+
+        let completed: Vec<Reminder> = legacy_store
+            .completed
+            .into_iter()
+            .map(migrate_legacy_reminder)
+            .collect();
+
+        eprintln!("Migrated {} pending, {} completed reminders", pending.len(), completed.len());
+
+        return Some(ReminderStore { pending, completed });
+    }
+
+    None
 }
 
 pub struct Storage {
@@ -294,14 +394,22 @@ impl Storage {
         let content = response.into_string().map_err(|e| e.to_string())?;
         eprintln!("Drive content received: {} bytes", content.len());
 
-        match serde_json::from_str::<ReminderStore>(&content) {
-            Ok(data) => {
-                eprintln!("Parsed {} pending, {} completed reminders from Drive",
-                    data.pending.len(), data.completed.len());
-                self.data = data;
-            }
-            Err(e) => {
-                eprintln!("Failed to parse Drive content: {}. Content: {}", e, &content[..content.len().min(500)]);
+        // Try to parse as new format first
+        if let Ok(data) = serde_json::from_str::<ReminderStore>(&content) {
+            eprintln!("Parsed {} pending, {} completed reminders from Drive",
+                data.pending.len(), data.completed.len());
+            self.data = data;
+        } else {
+            // Try migration from legacy format
+            if let Some(migrated) = try_migrate_legacy_data(&content, None) {
+                eprintln!("Migrated legacy data from Drive");
+                self.data = migrated;
+                // Save migrated data back to Drive
+                if let Err(e) = self.save_to_drive() {
+                    eprintln!("Warning: Failed to save migrated data to Drive: {}", e);
+                }
+            } else {
+                eprintln!("Failed to parse Drive content, using default");
                 self.data = ReminderStore::default();
             }
         }
@@ -349,7 +457,21 @@ impl Storage {
         let path = self.app_data_path.join("reminders.json");
         if path.exists() {
             let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            self.data = serde_json::from_str(&content).unwrap_or_default();
+
+            // Try to parse as new format first
+            if let Ok(data) = serde_json::from_str::<ReminderStore>(&content) {
+                self.data = data;
+            } else {
+                // Try migration from legacy format
+                let backup_path = self.app_data_path.join("reminders_backup_v1.json");
+                if let Some(migrated) = try_migrate_legacy_data(&content, Some(&backup_path)) {
+                    self.data = migrated;
+                    // Save migrated data immediately
+                    self.save_local()?;
+                } else {
+                    self.data = ReminderStore::default();
+                }
+            }
         }
         Ok(())
     }
@@ -385,39 +507,181 @@ impl Storage {
 
     pub fn get_pending_reminders(&self) -> Vec<Reminder> {
         let mut reminders = self.data.pending.clone();
-        // Primary sort by sort_order, secondary by due_time
-        reminders.sort_by(|a, b| {
-            a.sort_order.cmp(&b.sort_order)
-                .then_with(|| a.due_time.cmp(&b.due_time))
-        });
+        // Sort by sort_order (lower = higher priority)
+        reminders.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        reminders
+    }
+
+    /// Get only actual (non-backlog) pending reminders
+    pub fn get_actual_reminders(&self) -> Vec<Reminder> {
+        let mut reminders: Vec<Reminder> = self.data.pending
+            .iter()
+            .filter(|r| r.list_type == ListType::Actual)
+            .cloned()
+            .collect();
+        reminders.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
+        reminders
+    }
+
+    /// Get only backlog pending reminders
+    pub fn get_backlog_reminders(&self) -> Vec<Reminder> {
+        let mut reminders: Vec<Reminder> = self.data.pending
+            .iter()
+            .filter(|r| r.list_type == ListType::Backlog)
+            .cloned()
+            .collect();
+        reminders.sort_by(|a, b| a.sort_order.cmp(&b.sort_order));
         reminders
     }
 
     pub fn get_completed_reminders(&self) -> Vec<Reminder> {
         let mut reminders = self.data.completed.clone();
-        reminders.sort_by(|a, b| b.due_time.cmp(&a.due_time));
+        // Sort by completion time (newest first)
+        reminders.sort_by(|a, b| {
+            let a_time = a.completed_at.as_deref().unwrap_or("");
+            let b_time = b.completed_at.as_deref().unwrap_or("");
+            b_time.cmp(a_time)
+        });
         reminders
     }
 
     pub fn add_reminder(&mut self, mut reminder: Reminder) -> Result<i64, String> {
         reminder.id = self.next_id();
         let id = reminder.id;
+
+        // If adding to actual list, handle the 6-task limit
+        if reminder.list_type == ListType::Actual {
+            let actual_count = self.data.pending
+                .iter()
+                .filter(|r| r.list_type == ListType::Actual)
+                .count();
+
+            if actual_count >= MAX_ACTUAL_TASKS {
+                // Bump the least important actual task to backlog
+                self.bump_least_important_to_backlog();
+            }
+
+            // Shift all actual tasks' sort_order to make room at the top
+            for r in self.data.pending.iter_mut() {
+                if r.list_type == ListType::Actual {
+                    r.sort_order += 1;
+                }
+            }
+            reminder.sort_order = 0; // New task at top
+        } else {
+            // For backlog, add to top of backlog
+            let min_backlog_order = self.data.pending
+                .iter()
+                .filter(|r| r.list_type == ListType::Backlog)
+                .map(|r| r.sort_order)
+                .min()
+                .unwrap_or(0);
+            reminder.sort_order = min_backlog_order - 1;
+        }
+
         self.data.pending.push(reminder);
         self.save()?;
         Ok(id)
+    }
+
+    /// Bump the least important actual task to the top of backlog
+    fn bump_least_important_to_backlog(&mut self) {
+        // Find the actual task with highest sort_order (least important)
+        if let Some(idx) = self.data.pending
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.list_type == ListType::Actual)
+            .max_by_key(|(_, r)| r.sort_order)
+            .map(|(i, _)| i)
+        {
+            // Move to backlog at top
+            self.data.pending[idx].list_type = ListType::Backlog;
+            let min_backlog_order = self.data.pending
+                .iter()
+                .filter(|r| r.list_type == ListType::Backlog)
+                .map(|r| r.sort_order)
+                .min()
+                .unwrap_or(0);
+            self.data.pending[idx].sort_order = min_backlog_order - 1;
+        }
     }
 
     pub fn update_reminder(
         &mut self,
         id: i64,
         message: String,
-        due_time: String,
-        recurrence: String,
+        urgency: Urgency,
     ) -> Result<(), String> {
         if let Some(reminder) = self.data.pending.iter_mut().find(|r| r.id == id) {
             reminder.message = message;
-            reminder.due_time = due_time;
-            reminder.recurrence = recurrence;
+            reminder.urgency = urgency;
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// Move a reminder between actual and backlog lists
+    pub fn move_reminder(&mut self, id: i64, to_list: ListType) -> Result<(), String> {
+        // First, check if the reminder exists and get its current list type
+        let current_list = self.data.pending
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.list_type.clone());
+
+        let current_list = match current_list {
+            Some(list) if list == to_list => return Ok(()), // Already in target list
+            Some(list) => list,
+            None => return Ok(()), // Reminder not found
+        };
+
+        if to_list == ListType::Actual {
+            // Moving to actual - check limit
+            let actual_count = self.data.pending
+                .iter()
+                .filter(|r| r.list_type == ListType::Actual && r.id != id)
+                .count();
+
+            if actual_count >= MAX_ACTUAL_TASKS {
+                // Bump least important to backlog first
+                self.bump_least_important_to_backlog();
+            }
+
+            // Shift all actual tasks to make room at top
+            for r in self.data.pending.iter_mut() {
+                if r.list_type == ListType::Actual {
+                    r.sort_order += 1;
+                }
+            }
+
+            // Now update our reminder
+            if let Some(r) = self.data.pending.iter_mut().find(|r| r.id == id) {
+                r.list_type = ListType::Actual;
+                r.sort_order = 0; // Top of actual
+            }
+        } else {
+            // Moving to backlog - calculate min order first
+            let min_backlog_order = self.data.pending
+                .iter()
+                .filter(|r| r.list_type == ListType::Backlog)
+                .map(|r| r.sort_order)
+                .min()
+                .unwrap_or(0);
+
+            // Then update the reminder
+            if let Some(r) = self.data.pending.iter_mut().find(|r| r.id == id) {
+                r.list_type = ListType::Backlog;
+                r.sort_order = min_backlog_order - 1;
+            }
+        }
+
+        self.save()?;
+        Ok(())
+    }
+
+    /// Update urgency of a reminder
+    pub fn set_urgency(&mut self, id: i64, urgency: Urgency) -> Result<(), String> {
+        if let Some(reminder) = self.data.pending.iter_mut().find(|r| r.id == id) {
+            reminder.urgency = urgency;
             self.save()?;
         }
         Ok(())
@@ -432,32 +696,10 @@ impl Storage {
 
     pub fn complete_reminder(&mut self, id: i64) -> Result<(), String> {
         if let Some(pos) = self.data.pending.iter().position(|r| r.id == id) {
-            let reminder = self.data.pending.remove(pos);
-
-            // Handle recurring reminders - create next occurrence
-            if reminder.recurrence == "daily" || reminder.recurrence == "weekly" {
-                if let Ok(due) = chrono::DateTime::parse_from_rfc3339(&reminder.due_time) {
-                    let next_due = if reminder.recurrence == "daily" {
-                        due + Duration::days(1)
-                    } else {
-                        due + Duration::weeks(1)
-                    };
-
-                    let mut new_reminder = Reminder::new(
-                        reminder.message.clone(),
-                        next_due.to_rfc3339(),
-                        reminder.recurrence.clone(),
-                    );
-                    new_reminder.id = self.next_id();
-                    self.data.pending.push(new_reminder);
-                }
-            }
-
-            // Mark original as completed
-            let mut completed_reminder = reminder;
-            completed_reminder.is_completed = true;
-            completed_reminder.completed_at = Some(Utc::now().to_rfc3339());
-            self.data.completed.push(completed_reminder);
+            let mut reminder = self.data.pending.remove(pos);
+            reminder.is_completed = true;
+            reminder.completed_at = Some(Utc::now().to_rfc3339());
+            self.data.completed.push(reminder);
             self.save()?;
         }
         Ok(())
@@ -468,6 +710,33 @@ impl Storage {
             let mut reminder = self.data.completed.remove(pos);
             reminder.is_completed = false;
             reminder.completed_at = None;
+
+            // Add to actual if there's room, otherwise backlog
+            let actual_count = self.data.pending
+                .iter()
+                .filter(|r| r.list_type == ListType::Actual)
+                .count();
+
+            if actual_count < MAX_ACTUAL_TASKS {
+                reminder.list_type = ListType::Actual;
+                // Add to top of actual
+                for r in self.data.pending.iter_mut() {
+                    if r.list_type == ListType::Actual {
+                        r.sort_order += 1;
+                    }
+                }
+                reminder.sort_order = 0;
+            } else {
+                reminder.list_type = ListType::Backlog;
+                let min_backlog = self.data.pending
+                    .iter()
+                    .filter(|r| r.list_type == ListType::Backlog)
+                    .map(|r| r.sort_order)
+                    .min()
+                    .unwrap_or(0);
+                reminder.sort_order = min_backlog - 1;
+            }
+
             self.data.pending.push(reminder);
             self.save()?;
         }
@@ -492,17 +761,94 @@ impl Storage {
         Ok(true)
     }
 
-    pub fn snooze_reminder(&mut self, id: i64, minutes: i64) -> Result<(), String> {
-        if let Some(reminder) = self.data.pending.iter_mut().find(|r| r.id == id) {
-            if reminder.original_due_time.is_none() {
-                reminder.original_due_time = Some(reminder.due_time.clone());
-            }
-            let new_time = Utc::now() + Duration::minutes(minutes);
-            reminder.due_time = new_time.to_rfc3339();
-            reminder.is_snoozed = true;
-            self.save()?;
+    /// Get completion stats
+    pub fn get_completion_stats(&self) -> (usize, usize) {
+        let now = Utc::now();
+        let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
+        let week_start = today_start - chrono::Duration::days(now.weekday().num_days_from_monday() as i64);
+
+        let today_count = self.data.completed
+            .iter()
+            .filter(|r| {
+                if let Some(ref completed_at) = r.completed_at {
+                    if let Ok(dt) = DateTime::parse_from_rfc3339(completed_at) {
+                        return dt.naive_utc() >= today_start.and_utc().naive_utc();
+                    }
+                }
+                false
+            })
+            .count();
+
+        let week_count = self.data.completed
+            .iter()
+            .filter(|r| {
+                if let Some(ref completed_at) = r.completed_at {
+                    if let Ok(dt) = DateTime::parse_from_rfc3339(completed_at) {
+                        return dt.naive_utc() >= week_start.and_utc().naive_utc();
+                    }
+                }
+                false
+            })
+            .count();
+
+        (today_count, week_count)
+    }
+
+    /// Get historical stats for reports
+    /// Returns: (daily_completions, hourly_distribution, daily_distribution, backlog_size)
+    /// - daily_completions: Vec of (date_string, count) for past 14 days
+    /// - hourly_distribution: Vec of 24 counts (0-23)
+    /// - daily_distribution: Vec of 7 counts (Mon-Sun)
+    /// - backlog_size: current backlog task count
+    pub fn get_historical_stats(&self) -> (Vec<(String, usize)>, Vec<usize>, Vec<usize>, usize) {
+        let now = Utc::now();
+
+        // Daily completions for past 14 days
+        let mut daily_completions: Vec<(String, usize)> = Vec::new();
+        for days_ago in (0..14).rev() {
+            let date = now.date_naive() - chrono::Duration::days(days_ago);
+            let date_str = date.format("%Y-%m-%d").to_string();
+            let count = self.data.completed
+                .iter()
+                .filter(|r| {
+                    if let Some(ref completed_at) = r.completed_at {
+                        if let Ok(dt) = DateTime::parse_from_rfc3339(completed_at) {
+                            return dt.date_naive() == date;
+                        }
+                    }
+                    false
+                })
+                .count();
+            daily_completions.push((date_str, count));
         }
-        Ok(())
+
+        // Hourly distribution (all time)
+        let mut hourly: Vec<usize> = vec![0; 24];
+        for r in &self.data.completed {
+            if let Some(ref completed_at) = r.completed_at {
+                if let Ok(dt) = DateTime::parse_from_rfc3339(completed_at) {
+                    hourly[dt.hour() as usize] += 1;
+                }
+            }
+        }
+
+        // Daily distribution (all time, 0=Monday, 6=Sunday)
+        let mut daily: Vec<usize> = vec![0; 7];
+        for r in &self.data.completed {
+            if let Some(ref completed_at) = r.completed_at {
+                if let Ok(dt) = DateTime::parse_from_rfc3339(completed_at) {
+                    daily[dt.weekday().num_days_from_monday() as usize] += 1;
+                }
+            }
+        }
+
+        // Backlog size
+        let backlog_size = self.data.pending
+            .iter()
+            .filter(|r| r.list_type == ListType::Backlog)
+            .count();
+
+        (daily_completions, hourly, daily, backlog_size)
     }
 
     /// Reorder pending reminders based on the given order of IDs

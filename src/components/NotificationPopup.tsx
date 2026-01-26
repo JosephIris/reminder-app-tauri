@@ -1,26 +1,26 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Reminder } from "../types";
+import type { Reminder, UrgencyType } from "../types";
 
 interface NotificationPopupProps {
   reminder: Reminder;
-  onSnooze: (id: number, minutes: number) => void;
   onComplete: (id: number) => void;
   onDismiss: () => void;
 }
 
+const urgencyLabels: Record<UrgencyType, string> = {
+  now: "Needs attention now",
+  today: "Due today",
+  soon: "Coming up soon",
+  whenever: "No rush",
+};
+
 export function NotificationPopup({
   reminder,
-  onSnooze,
   onComplete,
   onDismiss,
 }: NotificationPopupProps) {
-  const dueTime = new Date(reminder.due_time);
-  const timeStr = dueTime.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const urgencyLabel = urgencyLabels[reminder.urgency] || "Task";
 
   // Truncate message if too long
   const displayMessage =
@@ -31,7 +31,7 @@ export function NotificationPopup({
   useEffect(() => {
     // Play system sound
     const audio = new Audio();
-    audio.src = "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JiYqGfXJqYV9ncHuEi4yIgHZsZGJkbXd/hoyMiIF2bGRlZ3B5gYaKiYR7cmljYmVsdX6FiYmFfnNpYWJmbHR9hYmJhX5zaWJjZm10fYaJiYV+c2liY2VsdH2GiYmFfnNpYmNlbHR9homJhX5zaWJjZWx0fYaJiYV+c2liY2VsdH2GiYmFfnNpYmNlbA==";
+    audio.src = "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2JiYqGfXJqYV9ncHuEi4yIgHZsZGJkbXd/hoyMiIF2bGRlZ3B5gYaKiYR7cmljYmVldX6FiYmFfnNpYWJmbHR9hYmJhX5zaWJjZm10fYaJiYV+c2liY2VsdH2GiYmFfnNpYmNlbHR9homJhX5zaWJjZWx0fYaJiYV+c2liY2VsdH2GiYmFfnNpYmNlbA==";
     audio.play().catch(() => {}); // Ignore if can't play
 
     // Flash the window
@@ -47,38 +47,14 @@ export function NotificationPopup({
         style={{ opacity: 0.9 }}
       >
         <div className="flex items-center gap-4">
-          {/* Left: Message and time */}
+          {/* Left: Message and urgency */}
           <div className="flex-1 min-w-0">
             <p className="text-white font-semibold truncate">{displayMessage}</p>
-            <p className="text-gray-400 text-sm">{timeStr}</p>
+            <p className="text-gray-400 text-sm">{urgencyLabel}</p>
           </div>
 
           {/* Right: Action buttons */}
           <div className="flex items-center gap-1">
-            {/* Snooze 5m */}
-            <button
-              onClick={() => {
-                onSnooze(reminder.id, 5);
-                onDismiss();
-              }}
-              className="px-2 py-1.5 text-xs bg-dark-600 hover:bg-dark-500 text-gray-300 rounded transition-colors"
-              title="Snooze 5 minutes"
-            >
-              +5m
-            </button>
-
-            {/* Snooze 15m */}
-            <button
-              onClick={() => {
-                onSnooze(reminder.id, 15);
-                onDismiss();
-              }}
-              className="px-2 py-1.5 text-xs bg-dark-600 hover:bg-dark-500 text-gray-300 rounded transition-colors"
-              title="Snooze 15 minutes"
-            >
-              +15m
-            </button>
-
             {/* Complete */}
             <button
               onClick={() => {

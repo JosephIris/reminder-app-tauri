@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Reminder } from "../types";
+import type { Reminder, UrgencyType, ListType } from "../types";
 import { showToast } from "../components/Toast";
 
 export function useReminders() {
   const [pending, setPending] = useState<Reminder[]>([]);
   const [completed, setCompleted] = useState<Reminder[]>([]);
+  const [stats, setStats] = useState<{ today: number; week: number }>({ today: 0, week: 0 });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [leavingIds, setLeavingIds] = useState<Set<number>>(new Set());
@@ -14,14 +15,27 @@ export function useReminders() {
   // Store last deleted/completed for undo
   const lastActionRef = useRef<{ type: "complete" | "delete"; reminder: Reminder } | null>(null);
 
+  // Derived state: actual and backlog lists
+  const actual = useMemo(() =>
+    pending.filter(r => r.list_type === "actual").sort((a, b) => a.sort_order - b.sort_order),
+    [pending]
+  );
+
+  const backlog = useMemo(() =>
+    pending.filter(r => r.list_type === "backlog").sort((a, b) => a.sort_order - b.sort_order),
+    [pending]
+  );
+
   const refresh = useCallback(async () => {
     try {
-      const [pendingList, completedList] = await Promise.all([
+      const [pendingList, completedList, statsResult] = await Promise.all([
         invoke<Reminder[]>("get_pending_reminders"),
         invoke<Reminder[]>("get_completed_reminders"),
+        invoke<[number, number]>("get_completion_stats"),
       ]);
       setPending(pendingList);
       setCompleted(completedList);
+      setStats({ today: statsResult[0], week: statsResult[1] });
     } catch (error) {
       console.error("Failed to fetch reminders:", error);
       showToast("Failed to load reminders", "error");
@@ -30,20 +44,24 @@ export function useReminders() {
     }
   }, []);
 
-  const addReminder = useCallback(async (message: string, dueTime: Date, recurrence: string = "none") => {
+  const addReminder = useCallback(async (
+    message: string,
+    urgency: UrgencyType = "today",
+    listType: ListType = "actual"
+  ) => {
     setSyncing(true);
     try {
       await invoke("add_reminder", {
         message,
-        dueTime: dueTime.toISOString(),
-        recurrence,
+        urgency,
+        listType,
       });
       await refresh();
       await emit("refresh-reminders");
-      showToast("Reminder added", "success");
+      showToast("Task added", "success");
     } catch (error) {
       console.error("Failed to add reminder:", error);
-      showToast("Failed to add reminder", "error");
+      showToast("Failed to add task", "error");
     } finally {
       setSyncing(false);
     }
@@ -81,7 +99,7 @@ export function useReminders() {
       });
     } catch (error) {
       console.error("Failed to complete reminder:", error);
-      showToast("Failed to complete reminder", "error");
+      showToast("Failed to complete task", "error");
     } finally {
       setSyncing(false);
       setLeavingIds(prev => {
@@ -119,8 +137,8 @@ export function useReminders() {
           try {
             await invoke("add_reminder", {
               message: reminder.message,
-              dueTime: reminder.due_time,
-              recurrence: reminder.recurrence || "none",
+              urgency: reminder.urgency,
+              listType: reminder.list_type,
             });
             await refresh();
             await emit("refresh-reminders");
@@ -132,7 +150,7 @@ export function useReminders() {
       }
     } catch (error) {
       console.error("Failed to delete reminder:", error);
-      showToast("Failed to delete reminder", "error");
+      showToast("Failed to delete task", "error");
     } finally {
       setSyncing(false);
       setLeavingIds(prev => {
@@ -143,36 +161,48 @@ export function useReminders() {
     }
   }, [refresh, pending, completed]);
 
-  const snoozeReminder = useCallback(async (id: number, minutes: number) => {
-    setSyncing(true);
-    try {
-      await invoke("snooze_reminder", { id, minutes });
-      await refresh();
-      await emit("refresh-reminders");
-      showToast(`Snoozed for ${minutes} minutes`, "info");
-    } catch (error) {
-      console.error("Failed to snooze reminder:", error);
-      showToast("Failed to snooze reminder", "error");
-    } finally {
-      setSyncing(false);
-    }
-  }, [refresh]);
-
-  const updateReminder = useCallback(async (id: number, message: string, dueTime: Date, recurrence: string) => {
+  const updateReminder = useCallback(async (id: number, message: string, urgency: UrgencyType) => {
     setSyncing(true);
     try {
       await invoke("update_reminder", {
         id,
         message,
-        dueTime: dueTime.toISOString(),
-        recurrence,
+        urgency,
       });
       await refresh();
       await emit("refresh-reminders");
-      showToast("Reminder updated", "success");
+      showToast("Task updated", "success");
     } catch (error) {
       console.error("Failed to update reminder:", error);
-      showToast("Failed to update reminder", "error");
+      showToast("Failed to update task", "error");
+    } finally {
+      setSyncing(false);
+    }
+  }, [refresh]);
+
+  const moveReminder = useCallback(async (id: number, toList: ListType) => {
+    setSyncing(true);
+    try {
+      await invoke("move_reminder", { id, toList });
+      await refresh();
+      await emit("refresh-reminders");
+    } catch (error) {
+      console.error("Failed to move reminder:", error);
+      showToast("Failed to move task", "error");
+    } finally {
+      setSyncing(false);
+    }
+  }, [refresh]);
+
+  const setUrgency = useCallback(async (id: number, urgency: UrgencyType) => {
+    setSyncing(true);
+    try {
+      await invoke("set_urgency", { id, urgency });
+      await refresh();
+      await emit("refresh-reminders");
+    } catch (error) {
+      console.error("Failed to set urgency:", error);
+      showToast("Failed to update urgency", "error");
     } finally {
       setSyncing(false);
     }
@@ -205,6 +235,12 @@ export function useReminders() {
         const reminder = idToReminder.get(id);
         if (reminder) {
           reordered.push({ ...reminder, sort_order: reordered.length });
+        }
+      }
+      // Add any reminders not in orderedIds (shouldn't happen, but just in case)
+      for (const r of prev) {
+        if (!orderedIds.includes(r.id)) {
+          reordered.push(r);
         }
       }
       return reordered;
@@ -246,7 +282,10 @@ export function useReminders() {
 
   return {
     pending,
+    actual,
+    backlog,
     completed,
+    stats,
     loading,
     syncing,
     leavingIds,
@@ -254,8 +293,9 @@ export function useReminders() {
     addReminder,
     completeReminder,
     deleteReminder,
-    snoozeReminder,
     updateReminder,
+    moveReminder,
+    setUrgency,
     refreshFromCloud,
     reorderReminders,
   };

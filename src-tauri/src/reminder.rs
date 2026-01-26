@@ -1,44 +1,58 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Urgency {
+    Now,
+    Today,
+    Soon,
+    Whenever,
+}
+
+impl Default for Urgency {
+    fn default() -> Self {
+        Urgency::Today
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ListType {
+    Actual,
+    Backlog,
+}
+
+impl Default for ListType {
+    fn default() -> Self {
+        ListType::Actual
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reminder {
     pub id: i64,
     pub message: String,
-    pub due_time: String,
+    pub urgency: Urgency,
+    pub list_type: ListType,
     pub created_at: String,
-    pub recurrence: String,
     pub is_completed: bool,
-    pub is_snoozed: bool,
-    pub original_due_time: Option<String>,
     pub completed_at: Option<String>,
     #[serde(default)]
-    pub sort_order: i64, // Lower = higher priority (shown first in list / rightmost in bar)
+    pub sort_order: i64, // Lower = higher priority (shown first in list / leftmost on bar)
 }
 
 impl Reminder {
-    pub fn new(message: String, due_time: String, recurrence: String) -> Self {
+    pub fn new(message: String, urgency: Urgency, list_type: ListType) -> Self {
         Self {
             id: 0, // Will be set by storage
             message,
-            due_time,
+            urgency,
+            list_type,
             created_at: Utc::now().to_rfc3339(),
-            recurrence,
             is_completed: false,
-            is_snoozed: false,
-            original_due_time: None,
             completed_at: None,
-            sort_order: i64::MAX, // New reminders go to end by default
+            sort_order: 0, // New reminders go to top (most important)
         }
-    }
-
-    pub fn is_due(&self) -> bool {
-        if self.is_completed {
-            return false;
-        }
-        if let Ok(due) = DateTime::parse_from_rfc3339(&self.due_time) {
-            return due <= Utc::now();
-        }
-        false
     }
 }

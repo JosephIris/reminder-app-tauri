@@ -11,7 +11,6 @@
         box-sizing: border-box;
       }
 
-      /* Mica-inspired dark bar background + layout */
       html {
         height: 100%;
       }
@@ -27,7 +26,6 @@
         user-select: none;
         height: 100%;
         width: 100%;
-        /* Flexbox layout for cards */
         display: flex;
         align-items: center;
         justify-content: flex-start;
@@ -35,19 +33,57 @@
         gap: 10px;
       }
 
-      @property --gradient-angle {
-        syntax: "<angle>";
-        initial-value: 0deg;
-        inherits: false;
+      /* Stats section on the right */
+      .stats-section {
+        position: fixed;
+        right: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
       }
 
-      @property --glow-opacity {
-        syntax: "<number>";
-        initial-value: 0.4;
-        inherits: false;
+      .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.4);
       }
 
-      /* Reminder card - Mica-style with subtle depth */
+      .stat-item .count {
+        font-weight: 600;
+      }
+
+      .stat-item.today .count {
+        color: #4ade80;
+      }
+
+      .stat-item.week .count {
+        color: #60a5fa;
+      }
+
+      /* Urgency colors */
+      .urgency-now { color: #f87171; }
+      .urgency-today { color: #fbbf24; }
+      .urgency-soon { color: #facc15; }
+      .urgency-whenever { color: #9ca3af; }
+
+      .urgency-badge {
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.05);
+      }
+
       .reminder-card {
         position: relative;
         flex-shrink: 0;
@@ -66,16 +102,13 @@
         height: 44px;
         cursor: grab;
         overflow: visible;
-        /* Subtle inner highlight + soft shadow */
         box-shadow:
           inset 0 1px 0 rgba(255, 255, 255, 0.07),
           0 2px 4px rgba(0, 0, 0, 0.12),
           0 1px 2px rgba(0, 0, 0, 0.08);
         transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-        /* Create stacking context so ::before z-index works */
         isolation: isolate;
       }
-
 
       .reminder-card:hover {
         background: linear-gradient(
@@ -90,7 +123,6 @@
         transform: translateY(-2px);
       }
 
-      /* Disable hover during drag */
       body.dragging-active .reminder-card:hover {
         background: linear-gradient(
           180deg,
@@ -114,7 +146,6 @@
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
       }
 
-      /* Active/focused card - glowing border effect */
       .reminder-card.active {
         border-color: #8b5cf6;
         box-shadow:
@@ -157,23 +188,11 @@
         font-size: 13px;
       }
 
-      .reminder-card.active .card-btn.snooze-inline {
-        width: 28px;
-        font-size: 11px;
-      }
-
-      /* Hover expanded - show full text */
       .reminder-card.hover-expanded .card-message,
       .reminder-card.hover-controls .card-message {
         white-space: nowrap;
         overflow: visible;
         text-overflow: clip;
-      }
-
-      @keyframes gradient-rotate {
-        to {
-          --gradient-angle: 360deg;
-        }
       }
 
       .card-content {
@@ -194,16 +213,12 @@
         transition: font-size 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
-      /* Hide time by default - Motion One handles animation */
-      .card-time {
-        color: #a1a1aa;
-        font-size: 10px;
+      .card-urgency {
         display: none;
         opacity: 0;
         transform: translateY(-4px);
       }
 
-      /* Hidden by default - width 0 until animated in */
       .card-actions {
         display: flex;
         gap: 4px;
@@ -215,7 +230,6 @@
         flex-shrink: 0;
       }
 
-      /* When visible (hover-controls or active), show full width and enable interaction */
       .reminder-card.hover-controls .card-actions,
       .reminder-card.active .card-actions {
         width: auto;
@@ -256,18 +270,6 @@
         color: #f87171;
       }
 
-      .card-btn.snooze-inline {
-        font-size: 10px;
-        font-weight: 600;
-        width: 24px;
-      }
-
-      .card-btn.snooze-inline:hover {
-        background: rgba(99, 102, 241, 0.2);
-        color: #a5b4fc;
-      }
-
-      /* Drag ghost - follows cursor */
       .drag-ghost {
         position: fixed;
         pointer-events: none;
@@ -277,12 +279,10 @@
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
       }
 
-      /* Original card becomes semi-transparent during drag */
       .reminder-card.being-dragged {
         opacity: 0.3;
       }
 
-      /* Placeholder shows drop position */
       .drag-placeholder {
         flex-shrink: 0;
         width: 100px;
@@ -300,7 +300,6 @@
         font-weight: 400;
       }
 
-      /* Tooltip styles */
       .tooltip {
         position: fixed;
         background: rgba(40, 40, 46, 0.97);
@@ -325,96 +324,55 @@
         word-wrap: break-word;
       }
 
-      .tooltip-time {
-        color: rgba(255, 255, 255, 0.4);
+      .tooltip-urgency {
         font-size: 10px;
         white-space: nowrap;
       }
     </style>
   </head>
   <body>
-    <div class="empty-state">No reminders due</div>
+    <div class="empty-state">No tasks</div>
+    <div class="stats-section">
+      <div class="stat-item today">
+        <span class="count" id="stats-today">0</span>
+        <span>today</span>
+      </div>
+      <div class="stat-item week">
+        <span class="count" id="stats-week">0</span>
+        <span>week</span>
+      </div>
+    </div>
 
     <script src="motion.js"></script>
     <script>
-      // Motion One from local bundle - use regular script, not module
-      // Verify Motion is loaded
       if (typeof Motion === 'undefined') {
         console.error("[BAR] FATAL: Motion One not loaded!");
-      } else {
-        console.log("[BAR] Motion One loaded successfully");
-        console.log("[BAR] Motion.animate:", typeof Motion.animate);
-        console.log("[BAR] Motion.spring:", typeof Motion.spring);
       }
 
       const { animate, spring } = Motion;
-
       const { invoke } = window.__TAURI__.core;
       const { listen, emit } = window.__TAURI__.event;
 
-      // Warm up Motion One animations to avoid first-run jank
-      // This pre-compiles the spring physics and animation pipeline by running
-      // all animation types used in the app multiple times
+      // Warm up animations
       (function warmupAnimations() {
         const dummy = document.createElement('div');
         dummy.style.cssText = 'position:absolute;left:-9999px;width:100px;height:40px;opacity:1;';
         document.body.appendChild(dummy);
 
-        const dummy2 = document.createElement('div');
-        dummy2.style.cssText = 'position:absolute;left:-9999px;width:50px;height:20px;opacity:0;transform:translateX(8px);';
-        document.body.appendChild(dummy2);
-
-        // Run multiple warm-up iterations to properly JIT-compile all animation paths
         let iteration = 0;
-        const maxIterations = 3;
-
         function runWarmup() {
-          // Warm up spring animations (card expand/collapse)
           animate(dummy, { width: iteration % 2 === 0 ? '200px' : '100px' }, {
             type: spring,
             stiffness: 225,
             damping: 25
           });
-
-          // Warm up opacity/transform animations (actions fade in/out)
-          animate(dummy2, {
-            opacity: iteration % 2 === 0 ? 1 : 0,
-            transform: iteration % 2 === 0 ? 'translateX(0px)' : 'translateX(8px)'
-          }, {
-            duration: 0.15,
-            easing: 'ease-out'
-          });
-
-          // Warm up scale animations (focus effect)
-          animate(dummy, {
-            transform: iteration % 2 === 0 ? 'scale(1.01)' : 'scale(1)'
-          }, {
-            type: spring,
-            stiffness: 300,
-            damping: 30
-          });
-
-          // Warm up button press animation
-          animate(dummy2, { transform: 'scale(0.92)' }, { duration: 0.1 }).finished.then(() => {
-            animate(dummy2, { transform: 'scale(1)' }, {
-              type: spring,
-              stiffness: 400,
-              damping: 15
-            });
-          });
-
           iteration++;
-          if (iteration < maxIterations) {
+          if (iteration < 3) {
             requestAnimationFrame(runWarmup);
           } else {
-            // Clean up after all iterations complete
-            setTimeout(() => {
-              dummy.remove();
-              dummy2.remove();
-            }, 300);
+            setTimeout(() => dummy.remove(), 300);
           }
         }
-
         runWarmup();
       })();
 
@@ -432,63 +390,41 @@
       let placeholderEl = null;
       let dropTargetIndex = -1;
 
-      // Hover state tracking per card
-      const hoverTimers = new Map(); // id -> { expandTimer, controlsTimer }
-
-      // Cleanup tracking - prevent memory leaks on window reload
+      const hoverTimers = new Map();
       let cleanupFns = [];
       let pollInterval = null;
-      let visibilityHandler = null;
 
-      // Cleanup function - called before window unload
+      const urgencyConfig = {
+        now: { label: 'NOW', class: 'urgency-now' },
+        today: { label: 'Today', class: 'urgency-today' },
+        soon: { label: 'Soon', class: 'urgency-soon' },
+        whenever: { label: '', class: 'urgency-whenever' }
+      };
+
       function cleanup() {
-        console.log('[BAR] Cleaning up resources...');
-
-        // Clear Tauri event listeners
-        cleanupFns.forEach(fn => {
-          try { fn(); } catch (e) { console.error('[BAR] Cleanup error:', e); }
-        });
+        cleanupFns.forEach(fn => { try { fn(); } catch (e) {} });
         cleanupFns = [];
-
-        // Clear polling interval
         if (pollInterval) {
           clearInterval(pollInterval);
           pollInterval = null;
         }
-
-        // Clear all hover timers
         hoverTimers.forEach((timers, id) => {
           clearTimeout(timers.expandTimer);
           clearTimeout(timers.controlsTimer);
         });
         hoverTimers.clear();
-
-        // Remove document event listeners
         document.removeEventListener('mousemove', handleDragMove);
         document.removeEventListener('mouseup', handleDragEnd);
-        if (visibilityHandler) {
-          document.removeEventListener('visibilitychange', visibilityHandler);
-        }
-
-        console.log('[BAR] Cleanup complete');
       }
 
-      // Register cleanup on window unload
       window.addEventListener('beforeunload', cleanup);
 
-      console.log("[BAR] Script loaded");
-
-      // Card state configurations (heights fixed, widths are min/max)
       const cardConfigs = {
-        // Compact: truncated with "..."
         compact: { minWidth: 80, maxWidth: 140, height: 44 },
-        // Expanded: show FULL message, no truncation
         expanded: { minWidth: 120, maxWidth: 500, height: 44 },
-        // Focused: full message + controls
         focused: { minWidth: 200, maxWidth: 600, height: 50 }
       };
 
-      // Measure text width to calculate dynamic card width
       const measureCanvas = document.createElement('canvas');
       const measureCtx = measureCanvas.getContext('2d');
 
@@ -501,28 +437,20 @@
         const config = cardConfigs[state] || cardConfigs.compact;
         const fontSize = state === 'focused' ? 14 : 12;
         const textWidth = measureTextWidth(message, fontSize);
-
-        // padding (12px * 2) + gap (8px) + buffer
         let padding = 40;
 
-        // For compact, use a fixed small width (will truncate)
-        if (state === 'compact') {
-          return config.maxWidth;
-        }
+        if (state === 'compact') return config.maxWidth;
 
-        // For focused: fit full text + controls
         if (state === 'focused') {
-          const controlsWidth = 130; // 4 buttons + gaps
+          const controlsWidth = 80;
           const idealWidth = textWidth + padding + controlsWidth;
           return Math.min(Math.max(idealWidth, config.minWidth), config.maxWidth);
         }
 
-        // For expanded: fit the full text
         const idealWidth = textWidth + padding;
         return Math.min(Math.max(idealWidth, config.minWidth), config.maxWidth);
       }
 
-      // Set card state immediately (no animation) - used on initial render
       function setCardState(card, state, message) {
         const config = cardConfigs[state] || cardConfigs.compact;
         const width = calculateCardWidth(message, state);
@@ -530,114 +458,63 @@
         card.style.height = config.height + 'px';
       }
 
-      // Animate card to state with spring physics
       function animateCardExpand(card, state, message) {
         const config = cardConfigs[state] || cardConfigs.compact;
         const width = calculateCardWidth(message, state);
-        console.log(`[BAR] animateCardExpand: ${state}, width=${width}`);
-
         try {
           animate(card, {
             width: width + 'px',
             height: config.height + 'px'
           }, {
             type: spring,
-            stiffness: 225,  // 25% slower (was 300)
+            stiffness: 225,
             damping: 25
           });
         } catch (err) {
-          console.error(`[BAR] Animation error:`, err);
-          card.style.transition = 'width 0.3s ease-out, height 0.3s ease-out';
           card.style.width = width + 'px';
           card.style.height = config.height + 'px';
         }
       }
 
       function animateActionsIn(actions) {
-        console.log('[BAR] animateActionsIn called');
-        // Just fade in - no movement, controls are already in position
         actions.style.width = 'auto';
         actions.style.transform = 'none';
-
-        animate(actions, {
-          opacity: 1
-        }, {
-          duration: 0.2,
-          easing: 'ease-out'
-        });
+        animate(actions, { opacity: 1 }, { duration: 0.2, easing: 'ease-out' });
       }
 
       function animateActionsOut(actions) {
-        console.log('[BAR] animateActionsOut called');
+        animate(actions, { opacity: 0 }, { duration: 0.15, easing: 'ease-out' })
+          .finished.then(() => { actions.style.width = '0'; });
+      }
 
-        animate(actions, {
-          opacity: 0
-        }, {
-          duration: 0.15,
-          easing: 'ease-out'
-        }).finished.then(() => {
-          actions.style.width = '0';
+      function animateUrgencyIn(urgency) {
+        urgency.style.display = 'block';
+        animate(urgency, { opacity: 1, transform: 'translateY(0px)' }, {
+          type: spring, stiffness: 200, damping: 20
         });
       }
 
-      function animateTimeIn(time) {
-        time.style.display = 'block';
-        animate(time, {
-          opacity: 1,
-          transform: 'translateY(0px)'
-        }, {
-          type: spring,
-          stiffness: 200,
-          damping: 20
-        });
-      }
-
-      function animateTimeOut(time) {
-        animate(time, {
-          opacity: 0,
-          transform: 'translateY(-4px)'
-        }, {
-          type: spring,
-          stiffness: 200,
-          damping: 20
-        }).finished.then(() => {
-          time.style.display = 'none';
-        });
+      function animateUrgencyOut(urgency) {
+        animate(urgency, { opacity: 0, transform: 'translateY(-4px)' }, {
+          type: spring, stiffness: 200, damping: 20
+        }).finished.then(() => { urgency.style.display = 'none'; });
       }
 
       function animateFocusIn(card) {
-        // Subtle scale - don't exceed bar height
-        animate(card, {
-          transform: 'scale(1.01)'
-        }, {
-          type: spring,
-          stiffness: 300,
-          damping: 30
-        });
+        animate(card, { transform: 'scale(1.01)' }, { type: spring, stiffness: 300, damping: 30 });
       }
 
       function animateFocusOut(card) {
-        animate(card, {
-          transform: 'scale(1)'
-        }, {
-          type: spring,
-          stiffness: 300,
-          damping: 30
-        });
+        animate(card, { transform: 'scale(1)' }, { type: spring, stiffness: 300, damping: 30 });
       }
 
       function animateButtonPress(btn) {
         animate(btn, { transform: 'scale(0.92)' }, { duration: 0.1 })
           .finished.then(() => {
-            animate(btn, { transform: 'scale(1)' }, {
-              type: spring,
-              stiffness: 400,
-              damping: 15
-            });
+            animate(btn, { transform: 'scale(1)' }, { type: spring, stiffness: 400, damping: 15 });
           });
       }
 
-      // Create tooltip element
       function createTooltip() {
         if (!tooltipEl) {
           tooltipEl = document.createElement('div');
@@ -650,38 +527,18 @@
 
       function showTooltip(reminder, x, y) {
         if (!tooltipEl || isDragging) return;
-        const createdDate = new Date(reminder.created_at);
-        const createdStr = createdDate.toLocaleString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
+        const urg = urgencyConfig[reminder.urgency] || urgencyConfig.whenever;
         tooltipEl.innerHTML = `
           <span class="tooltip-message">${escapeHtml(reminder.message)}</span>
-          <span class="tooltip-time">Created: ${createdStr}</span>
+          <span class="tooltip-urgency ${urg.class}">${urg.label}</span>
         `;
-        const tooltipWidth = 420;
-        tooltipEl.style.left = Math.min(Math.max(x - 100, 8), window.innerWidth - tooltipWidth) + 'px';
+        tooltipEl.style.left = Math.min(Math.max(x - 100, 8), window.innerWidth - 420) + 'px';
         tooltipEl.style.top = '8px';
-        tooltipEl.style.bottom = 'auto';
         tooltipEl.style.display = 'flex';
       }
 
       function hideTooltip() {
-        if (tooltipEl) {
-          tooltipEl.style.display = 'none';
-        }
-      }
-
-      function formatTime(isoString) {
-        const date = new Date(isoString);
-        return date.toLocaleTimeString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
-        });
+        if (tooltipEl) tooltipEl.style.display = 'none';
       }
 
       function escapeHtml(str) {
@@ -692,11 +549,6 @@
 
       async function handleComplete(id) {
         await invoke("complete_reminder", { id });
-        await emit("refresh-reminders");
-      }
-
-      async function handleSnooze(id, minutes) {
-        await invoke("snooze_reminder", { id, minutes });
         await emit("refresh-reminders");
       }
 
@@ -712,53 +564,41 @@
         await emit("focus-reminder", { id: focusedId });
       }
 
-      // Calculate width needed for full text + controls
       function calculateWidthWithControls(message) {
         const textWidth = measureTextWidth(message, 12);
-        // text + padding + controls (4 buttons ~130px)
-        const idealWidth = textWidth + 40 + 130;
+        const idealWidth = textWidth + 40 + 80;
         return Math.min(Math.max(idealWidth, 200), 600);
       }
 
-      // Hover state management with spring animations
       function startHoverTimers(card, reminder) {
         const id = reminder.id;
         const message = reminder.message;
-        console.log(`[BAR] startHoverTimers for id=${id}`);
         clearHoverTimers(id);
 
-        const time = card.querySelector('.card-time');
+        const urgency = card.querySelector('.card-urgency');
         const actions = card.querySelector('.card-actions');
 
         const timers = {
           expandTimer: setTimeout(() => {
-            console.log(`[BAR] expandTimer fired for id=${id}, isDragging=${isDragging}, focusedId=${focusedId}`);
             if (!isDragging && focusedId !== id) {
-              console.log(`[BAR] Expanding card id=${id}`);
               card.classList.add('hover-expanded');
               animateCardExpand(card, 'expanded', message);
-              if (time) animateTimeIn(time);
+              if (urgency) animateUrgencyIn(urgency);
             }
-          }, 500), // 0.5s for expand to show full text
+          }, 500),
           controlsTimer: setTimeout(() => {
-            console.log(`[BAR] controlsTimer fired for id=${id}`);
             if (!isDragging && focusedId !== id) {
-              console.log(`[BAR] Showing controls for id=${id}`);
               card.classList.add('hover-controls');
-              // First expand card width to fit controls
               const widthWithControls = calculateWidthWithControls(message);
               animate(card, { width: widthWithControls + 'px' }, {
-                type: spring,
-                stiffness: 225,  // 25% slower (was 300)
-                damping: 25
+                type: spring, stiffness: 225, damping: 25
               }).finished.then(() => {
-                // Then fade in controls after card has expanded
                 if (actions && card.classList.contains('hover-controls')) {
                   animateActionsIn(actions);
                 }
               });
             }
-          }, 1000) // 1s for controls
+          }, 1000)
         };
 
         hoverTimers.set(id, timers);
@@ -780,14 +620,13 @@
 
         card.classList.remove('hover-expanded', 'hover-controls');
 
-        // Animate back to compact state
         if (wasExpanded || hadControls) {
-          const time = card.querySelector('.card-time');
+          const urgency = card.querySelector('.card-urgency');
           const actions = card.querySelector('.card-actions');
           const message = card.dataset.message || '';
 
           animateCardExpand(card, 'compact', message);
-          if (time) animateTimeOut(time);
+          if (urgency) animateUrgencyOut(urgency);
           if (actions) animateActionsOut(actions);
         }
       }
@@ -820,9 +659,7 @@
         }
         document.body.classList.remove('dragging-active');
         const dragged = document.querySelector('.being-dragged');
-        if (dragged) {
-          dragged.classList.remove('being-dragged');
-        }
+        if (dragged) dragged.classList.remove('being-dragged');
       }
 
       function createPlaceholder() {
@@ -834,9 +671,7 @@
       }
 
       function removePlaceholder() {
-        if (placeholderEl && placeholderEl.parentNode) {
-          placeholderEl.remove();
-        }
+        if (placeholderEl && placeholderEl.parentNode) placeholderEl.remove();
       }
 
       function handleDragMove(e) {
@@ -845,9 +680,7 @@
         if (!isDragging && Math.abs(e.clientX - dragStartX) > 5) {
           isDragging = true;
           const card = document.querySelector(`.reminder-card[data-id="${draggedId}"]`);
-          if (card) {
-            createGhost(card);
-          }
+          if (card) createGhost(card);
         }
 
         if (!isDragging) return;
@@ -858,7 +691,6 @@
         }
 
         const cards = Array.from(document.body.querySelectorAll('.reminder-card:not(.being-dragged)'));
-
         let newDropIndex = orderedIds.length;
 
         for (let i = 0; i < cards.length; i++) {
@@ -873,9 +705,7 @@
         }
 
         const draggedIndex = orderedIds.indexOf(draggedId);
-        if (newDropIndex > draggedIndex) {
-          newDropIndex--;
-        }
+        if (newDropIndex > draggedIndex) newDropIndex--;
 
         if (newDropIndex !== dropTargetIndex) {
           dropTargetIndex = newDropIndex;
@@ -898,7 +728,8 @@
           if (insertBeforeEl) {
             document.body.insertBefore(placeholder, insertBeforeEl);
           } else {
-            document.body.appendChild(placeholder);
+            const statsSection = document.querySelector('.stats-section');
+            document.body.insertBefore(placeholder, statsSection);
           }
         }
       }
@@ -929,7 +760,6 @@
 
         if (didReorder) {
           render(true);
-
           try {
             await invoke('reorder_reminders', { orderedIds });
             await emit('refresh-reminders');
@@ -943,37 +773,31 @@
         const card = document.createElement('div');
         card.className = `reminder-card${isFocused ? ' active' : ''}`;
         card.dataset.id = reminder.id;
-        card.dataset.message = reminder.message; // Store message for animations
+        card.dataset.message = reminder.message;
 
-        // Set initial state based on focus
+        const urg = urgencyConfig[reminder.urgency] || urgencyConfig.whenever;
         const initialState = isFocused ? 'focused' : 'compact';
         setCardState(card, initialState, reminder.message);
 
-        // Time visibility: hidden in compact, visible in focused
-        const timeStyle = isFocused ? 'display: block; opacity: 1; transform: translateY(0);' : '';
-        // Actions visibility: hidden in compact, visible in focused
+        const urgencyStyle = isFocused ? 'display: block; opacity: 1; transform: translateY(0);' : '';
         const actionsStyle = isFocused ? 'opacity: 1; transform: translateX(0);' : '';
 
         card.innerHTML = `
           <div class="card-content">
             <div class="card-message">${escapeHtml(reminder.message)}</div>
-            <div class="card-time" style="${timeStyle}">${formatTime(reminder.due_time)}</div>
+            <div class="card-urgency ${urg.class}" style="${urgencyStyle}">${urg.label}</div>
           </div>
           <div class="card-actions" style="${actionsStyle}">
-            <button class="card-btn snooze-inline" data-minutes="15" title="Snooze 15 min">15</button>
-            <button class="card-btn snooze-inline" data-minutes="60" title="Snooze 1 hour">60</button>
             <button class="card-btn complete" title="Complete">&#10003;</button>
             <button class="card-btn dismiss" title="Dismiss">&#10005;</button>
           </div>
         `;
 
-        // Drag start
         card.addEventListener('mousedown', (e) => {
           if (e.target.closest('.card-actions')) return;
           handleDragStart(e, reminder.id);
         });
 
-        // Click to focus
         card.addEventListener('click', (e) => {
           if (e.target.closest('.card-actions')) return;
           if (!isDragging && !justFinishedDrag) {
@@ -981,21 +805,17 @@
           }
         });
 
-        // Hover state management - start timers on enter
         card.addEventListener('mouseenter', (e) => {
-          console.log(`[BAR] mouseenter id=${reminder.id}, isDragging=${isDragging}, focusedId=${focusedId}`);
           if (!isDragging && focusedId !== reminder.id) {
             startHoverTimers(card, reminder);
           }
         });
 
-        // Clear hover state on leave
         card.addEventListener('mouseleave', () => {
           clearHoverState(card, reminder.id);
           hideTooltip();
         });
 
-        // Action buttons with press animation
         const completeBtn = card.querySelector('.complete');
         completeBtn.addEventListener('click', () => {
           animateButtonPress(completeBtn);
@@ -1008,13 +828,6 @@
           handleDismiss(reminder.id);
         });
 
-        card.querySelectorAll('.snooze-inline').forEach(btn => {
-          btn.addEventListener('click', () => {
-            animateButtonPress(btn);
-            handleSnooze(reminder.id, parseInt(btn.dataset.minutes));
-          });
-        });
-
         return card;
       }
 
@@ -1025,21 +838,15 @@
           document.body.classList.remove('has-focus');
         }
 
+        const emptyState = document.body.querySelector('.empty-state');
+
         if (orderedIds.length === 0) {
-          // Remove all cards, keep only empty-state
           document.body.querySelectorAll('.reminder-card').forEach(el => el.remove());
-          if (!document.body.querySelector('.empty-state')) {
-            const emptyState = document.createElement('div');
-            emptyState.className = 'empty-state';
-            emptyState.textContent = 'No reminders due';
-            document.body.appendChild(emptyState);
-          }
+          if (emptyState) emptyState.style.display = '';
           return;
         }
 
-        // Remove empty-state if present
-        const emptyState = document.body.querySelector('.empty-state');
-        if (emptyState) emptyState.remove();
+        if (emptyState) emptyState.style.display = 'none';
 
         const existingCards = document.body.querySelectorAll('.reminder-card');
         const existingIds = Array.from(existingCards).map(c => parseInt(c.dataset.id));
@@ -1050,64 +857,51 @@
         if (canUpdateInPlace) {
           existingCards.forEach(card => {
             const id = parseInt(card.dataset.id);
-            const time = card.querySelector('.card-time');
+            const urgency = card.querySelector('.card-urgency');
             const actions = card.querySelector('.card-actions');
             const message = card.dataset.message || '';
             const wasActive = card.classList.contains('active');
             const shouldBeActive = focusedId === id;
-            const isHovering = card.classList.contains('hover-expanded') || card.classList.contains('hover-controls');
 
             if (shouldBeActive && !wasActive) {
-              // Becoming focused - animate in
-              console.log(`[BAR] Card ${id} becoming focused`);
               card.classList.add('active');
               card.classList.remove('hover-expanded', 'hover-controls');
               clearHoverTimers(id);
 
               animateFocusIn(card);
               animateCardExpand(card, 'focused', message);
-              if (time) animateTimeIn(time);
-              if (actions) {
-                console.log(`[BAR] Calling animateActionsIn for card ${id}`);
-                animateActionsIn(actions);
-              }
+              if (urgency) animateUrgencyIn(urgency);
+              if (actions) animateActionsIn(actions);
             } else if (!shouldBeActive && wasActive) {
-              // Losing focus - animate back to compact
               card.classList.remove('active');
 
               animateFocusOut(card);
               animateCardExpand(card, 'compact', message);
-              if (time) animateTimeOut(time);
+              if (urgency) animateUrgencyOut(urgency);
               if (actions) animateActionsOut(actions);
             }
-            // Note: Don't animate cards that are in hover state or already correct
-            // The hover state management handles those transitions
           });
         } else {
-          // Clear all hover timers before rebuild
           hoverTimers.forEach((_, id) => clearHoverTimers(id));
-
-          // Remove all existing cards
           document.body.querySelectorAll('.reminder-card').forEach(el => el.remove());
 
+          const statsSection = document.querySelector('.stats-section');
           for (const id of orderedIds) {
             const reminder = reminders.find(r => r.id === id);
             if (reminder) {
-              document.body.appendChild(createCard(reminder, focusedId === id));
+              document.body.insertBefore(createCard(reminder, focusedId === id), statsSection);
             }
           }
         }
       }
 
-      function updateReminders(newReminders) {
-        console.log('[BAR] updateReminders called with', newReminders.length, 'reminders');
-        if (newReminders.length > 0) {
-          console.log('[BAR] First reminder:', JSON.stringify(newReminders[0]));
-        }
-        reminders = newReminders;
+      function updateStats(today, week) {
+        document.getElementById('stats-today').textContent = today;
+        document.getElementById('stats-week').textContent = week;
+      }
 
-        // Use server's sort order - reminders come sorted by sort_order from backend
-        // DON'T reverse - left of bar = top of list (lowest sort_order)
+      function updateReminders(newReminders) {
+        reminders = newReminders;
         const newIds = newReminders.map(r => r.id);
         const idsChanged = orderedIds.length !== newIds.length ||
           !orderedIds.every((id, i) => id === newIds[i]);
@@ -1120,32 +914,21 @@
         render(idsChanged);
       }
 
-      function filterDueReminders(allReminders) {
-        const now = new Date();
-        return allReminders.filter(r => {
-          if (r.is_completed) return false;
-          const dueTime = new Date(r.due_time);
-          return dueTime <= now;
-        });
-      }
-
       async function fetchReminders() {
         try {
-          const allPending = await invoke("get_pending_reminders");
-          const dueReminders = filterDueReminders(allPending);
-          updateReminders(dueReminders);
+          // Get only actual reminders (not backlog)
+          const actualReminders = await invoke("get_actual_reminders");
+          updateReminders(actualReminders);
+
+          // Get completion stats
+          const stats = await invoke("get_completion_stats");
+          updateStats(stats[0], stats[1]);
         } catch (e) {
           console.error("Failed to fetch reminders:", e);
         }
       }
 
-      // Setup event listeners with proper cleanup tracking
       async function setupEventListeners() {
-        // Store unlisten functions for cleanup
-        cleanupFns.push(await listen("update-reminders", (event) => {
-          updateReminders(event.payload.reminders);
-        }));
-
         cleanupFns.push(await listen("refresh-reminders", () => {
           fetchReminders();
         }));
@@ -1161,11 +944,8 @@
             render();
           }
         }));
-
-        console.log('[BAR] Event listeners registered with cleanup tracking');
       }
 
-      // Initialize event listeners
       setupEventListeners();
 
       document.addEventListener('mousemove', handleDragMove);
@@ -1174,30 +954,7 @@
       render();
       fetchReminders();
 
-      // Poll every 5 seconds (reduced from 1s to prevent IPC saturation)
       pollInterval = setInterval(fetchReminders, 5000);
-
-      // Reposition on visibility restore (monitor wake)
-      let wasHidden = false;
-      let lastRepositionTime = 0;
-
-      visibilityHandler = async () => {
-        if (document.visibilityState === 'hidden') {
-          wasHidden = true;
-        } else if (document.visibilityState === 'visible' && wasHidden) {
-          wasHidden = false;
-          const now = Date.now();
-          if (now - lastRepositionTime > 2000) {
-            lastRepositionTime = now;
-            try {
-              await invoke('reposition_reminder_bar');
-            } catch (e) {
-              console.error('Reposition failed:', e);
-            }
-          }
-        }
-      };
-      document.addEventListener('visibilitychange', visibilityHandler);
     </script>
   </body>
 </html>

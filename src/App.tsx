@@ -15,27 +15,35 @@ import { CompletedSection } from "./components/CompletedSection";
 import { EditDialog } from "./components/EditDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { ToastContainer } from "./components/Toast";
+import { ReportsTab } from "./components/ReportsTab";
+import { OrganizePrompt } from "./components/OrganizePrompt";
 import { useReminders } from "./hooks/useReminders";
 import { useDragReorder } from "./hooks/useDragReorder";
 import type { Reminder } from "./types";
 
+type TabType = "tasks" | "reports";
+
 function App() {
   const {
-    pending,
+    actual,
+    backlog,
     completed,
+    stats,
     loading,
     syncing,
     leavingIds,
     addReminder,
     completeReminder,
     deleteReminder,
-    snoozeReminder,
     updateReminder,
+    moveReminder,
+    setUrgency,
     refresh,
     refreshFromCloud,
     reorderReminders,
   } = useReminders();
 
+  const [activeTab, setActiveTab] = useState<TabType>("tasks");
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [focusedReminderId, setFocusedReminderId] = useState<number | null>(null);
@@ -50,61 +58,64 @@ function App() {
   // Track if we're the source of the focus event (to avoid processing our own emit)
   const isLocalFocusRef = useRef(false);
 
-  // Mouse-based drag reorder (works better in Tauri webview than HTML5 drag and drop)
-  const handleReorder = useCallback(async (fromIndex: number, toIndex: number) => {
-    const newPending = [...pending];
-    const [draggedItem] = newPending.splice(fromIndex, 1);
-    newPending.splice(toIndex, 0, draggedItem);
-    const orderedIds = newPending.map(r => r.id);
+  // Mouse-based drag reorder for actual list
+  const handleReorderActual = useCallback(async (fromIndex: number, toIndex: number) => {
+    const newActual = [...actual];
+    const [draggedItem] = newActual.splice(fromIndex, 1);
+    newActual.splice(toIndex, 0, draggedItem);
+    const orderedIds = newActual.map(r => r.id);
     await reorderReminders(orderedIds);
-  }, [pending, reorderReminders]);
+  }, [actual, reorderReminders]);
 
-  const { dragState, handleMouseDown, justFinishedDrag } = useDragReorder({
-    onReorder: handleReorder,
-    itemSelector: '.reminder-item-wrapper',
-    containerSelector: '.reminder-list-container',
+  // Mouse-based drag reorder for backlog list
+  const handleReorderBacklog = useCallback(async (fromIndex: number, toIndex: number) => {
+    const newBacklog = [...backlog];
+    const [draggedItem] = newBacklog.splice(fromIndex, 1);
+    newBacklog.splice(toIndex, 0, draggedItem);
+    const orderedIds = newBacklog.map(r => r.id);
+    await reorderReminders(orderedIds);
+  }, [backlog, reorderReminders]);
+
+  const { dragState: dragStateActual, handleMouseDown: handleMouseDownActual, justFinishedDrag: justFinishedDragActual } = useDragReorder({
+    onReorder: handleReorderActual,
+    itemSelector: '.actual-item',
+    containerSelector: '.actual-list-container',
+  });
+
+  const { dragState: dragStateBacklog, handleMouseDown: handleMouseDownBacklog, justFinishedDrag: justFinishedDragBacklog } = useDragReorder({
+    onReorder: handleReorderBacklog,
+    itemSelector: '.backlog-item',
+    containerSelector: '.backlog-list-container',
   });
 
   // Handle focus from list - emit to bar
   const handleFocusReminder = useCallback(async (id: number | null) => {
     // Don't trigger focus if we just finished dragging
-    if (justFinishedDrag.current) return;
+    if (justFinishedDragActual.current || justFinishedDragBacklog.current) return;
     setFocusedReminderId(id);
     // Mark that we're emitting, so we ignore our own event
     isLocalFocusRef.current = true;
     // Emit to bar so it syncs
     await emit("focus-reminder", { id });
-  }, [justFinishedDrag]);
+  }, [justFinishedDragActual, justFinishedDragBacklog]);
 
-  // Check for due reminders every 10 seconds
+  // Show/hide bar based on actual tasks
   useEffect(() => {
-    // Don't check while still loading initial data
     if (loading) return;
 
-    const checkDueReminders = async () => {
-      const now = new Date();
-
-      // Collect all due reminders
-      const dueReminders = pending.filter((reminder) => {
-        if (reminder.is_completed) return false;
-        const dueTime = new Date(reminder.due_time);
-        return dueTime <= now;
-      });
-
-      if (dueReminders.length > 0) {
-        // Show bar if not already shown
+    const updateBar = async () => {
+      if (actual.length > 0) {
+        // Show bar if there are actual tasks
         if (!barShownRef.current) {
           try {
             await invoke("show_reminder_bar");
             barShownRef.current = true;
-            // Bar will fetch its own reminders on load
           } catch (e) {
             console.error("Failed to show reminder bar:", e);
           }
         }
-        // Bar listens for refresh-reminders and fetches its own data
       } else if (barShownRef.current) {
-        // Hide bar when no reminders due
+        // Hide bar when no actual tasks
         try {
           await invoke("hide_reminder_bar");
           barShownRef.current = false;
@@ -114,13 +125,8 @@ function App() {
       }
     };
 
-    // Check immediately
-    checkDueReminders();
-
-    // Set up interval - check every 5 seconds
-    const intervalId = setInterval(checkDueReminders, 5000);
-    return () => clearInterval(intervalId);
-  }, [pending, loading]);
+    updateBar();
+  }, [actual, loading]);
 
   // Listen for refresh events from Rust backend
   useEffect(() => {
@@ -167,7 +173,6 @@ function App() {
               console.log("Starting update download from:", update.download_url);
               await invoke("install_update", { downloadUrl: update.download_url });
               console.log("Update installed, exiting for update script to replace exe...");
-              // Exit so the PowerShell script can replace the exe and restart
               await exit(0);
             } catch (e) {
               console.error("Update failed:", e);
@@ -195,7 +200,6 @@ function App() {
   // Listen for focus-reminder event from the reminder bar
   useEffect(() => {
     const unlisten = listen<{ id: number | null }>("focus-reminder", (event) => {
-      // Ignore if we're the source of this event
       if (isLocalFocusRef.current) {
         isLocalFocusRef.current = false;
         return;
@@ -206,9 +210,6 @@ function App() {
       unlisten.then((fn) => fn()).catch(console.error);
     };
   }, []);
-
-  // Bar now fetches its own reminders directly from Rust backend on load,
-  // and listens for "refresh-reminders" events for updates
 
   if (loading) {
     return (
@@ -242,49 +243,121 @@ function App() {
           </div>
         )}
 
-        {/* Input */}
-        <ReminderInput onAdd={addReminder} syncing={syncing} inputRef={inputRef} />
-
-        {/* Pending reminders - px-1 gives room for glow effect */}
-        <div className="flex-1 overflow-y-auto mt-4 space-y-2 px-1 reminder-list-container">
-          {pending.length === 0 ? (
-            <div className="text-center py-16 flex flex-col items-center justify-center">
-              <div className="text-5xl mb-4 animate-float">✨</div>
-              <p className="text-gray-400 text-sm font-medium">All clear</p>
-              <p className="text-gray-600 text-xs mt-2 max-w-[200px]">
-                Your mind is free. Add a reminder above when you need one.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between px-1 mb-2">
-                <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Upcoming
-                </h2>
-                <span className="text-xs text-gray-600">{pending.length} reminder{pending.length !== 1 ? 's' : ''}</span>
-              </div>
-              {pending.map((reminder, index) => (
-                <ReminderItem
-                  key={reminder.id}
-                  reminder={reminder}
-                  isFocused={focusedReminderId === reminder.id}
-                  isLeaving={leavingIds.has(reminder.id)}
-                  isDragging={dragState.draggedIndex === index}
-                  isDragOver={dragState.dropTargetIndex === index}
-                  onComplete={completeReminder}
-                  onDelete={deleteReminder}
-                  onSnooze={snoozeReminder}
-                  onEdit={setEditingReminder}
-                  onFocus={handleFocusReminder}
-                  onMouseDown={(e) => handleMouseDown(e, index)}
-                />
-              ))}
-            </>
-          )}
-
-          {/* Completed section */}
-          <CompletedSection reminders={completed} onDelete={deleteReminder} />
+        {/* Stats bar */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <div className="flex gap-4">
+            <span className="text-xs text-gray-500">
+              <span className="text-accent-green font-medium">{stats.today}</span> today
+            </span>
+            <span className="text-xs text-gray-500">
+              <span className="text-accent-blue font-medium">{stats.week}</span> this week
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab("tasks")}
+              className={`px-3 py-1 text-xs rounded transition-colors ${
+                activeTab === "tasks"
+                  ? "bg-dark-600 text-white"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              Tasks
+            </button>
+            <button
+              onClick={() => setActiveTab("reports")}
+              className={`px-3 py-1 text-xs rounded transition-colors ${
+                activeTab === "reports"
+                  ? "bg-dark-600 text-white"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              Reports
+            </button>
+          </div>
         </div>
+
+        {activeTab === "tasks" ? (
+          <>
+            {/* Input */}
+            <ReminderInput onAdd={addReminder} syncing={syncing} inputRef={inputRef} />
+
+            {/* Task lists */}
+            <div className="flex-1 overflow-y-auto mt-4 space-y-4 px-1">
+              {/* Actual section */}
+              <div>
+                <div className="flex items-center justify-between px-1 mb-2">
+                  <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actual ({actual.length}/6)
+                  </h2>
+                </div>
+                {actual.length === 0 ? (
+                  <div className="text-center py-8 flex flex-col items-center justify-center">
+                    <div className="text-3xl mb-2 animate-float">✨</div>
+                    <p className="text-gray-500 text-xs">No active tasks</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 actual-list-container">
+                    {actual.map((reminder, index) => (
+                      <div key={reminder.id} className="actual-item">
+                        <ReminderItem
+                          reminder={reminder}
+                          isFocused={focusedReminderId === reminder.id}
+                          isLeaving={leavingIds.has(reminder.id)}
+                          isDragging={dragStateActual.draggedIndex === index}
+                          isDragOver={dragStateActual.dropTargetIndex === index}
+                          onComplete={completeReminder}
+                          onDelete={deleteReminder}
+                          onEdit={setEditingReminder}
+                          onMove={moveReminder}
+                          onSetUrgency={setUrgency}
+                          onFocus={handleFocusReminder}
+                          onMouseDown={(e) => handleMouseDownActual(e, index)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Backlog section */}
+              {backlog.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between px-1 mb-2">
+                    <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Backlog ({backlog.length})
+                    </h2>
+                  </div>
+                  <div className="space-y-2 backlog-list-container">
+                    {backlog.map((reminder, index) => (
+                      <div key={reminder.id} className="backlog-item">
+                        <ReminderItem
+                          reminder={reminder}
+                          isFocused={focusedReminderId === reminder.id}
+                          isLeaving={leavingIds.has(reminder.id)}
+                          isDragging={dragStateBacklog.draggedIndex === index}
+                          isDragOver={dragStateBacklog.dropTargetIndex === index}
+                          onComplete={completeReminder}
+                          onDelete={deleteReminder}
+                          onEdit={setEditingReminder}
+                          onMove={moveReminder}
+                          onSetUrgency={setUrgency}
+                          onFocus={handleFocusReminder}
+                          onMouseDown={(e) => handleMouseDownBacklog(e, index)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Completed section */}
+              <CompletedSection reminders={completed} onDelete={deleteReminder} />
+            </div>
+          </>
+        ) : (
+          <ReportsTab />
+        )}
       </div>
 
       {/* Edit dialog */}
@@ -308,6 +381,14 @@ function App() {
 
       {/* Toast notifications */}
       <ToastContainer />
+
+      {/* Organization prompt */}
+      <OrganizePrompt
+        actualCount={actual.length}
+        backlogCount={backlog.length}
+        completedToday={stats.today}
+        onOpenTasks={() => setActiveTab("tasks")}
+      />
     </div>
   );
 }

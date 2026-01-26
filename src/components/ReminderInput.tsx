@@ -1,22 +1,36 @@
 import { useState, useEffect, KeyboardEvent, RefObject } from "react";
-import { parseNaturalTime } from "../utils/time";
+import type { UrgencyType, ListType } from "../types";
 
 interface ReminderInputProps {
-  onAdd: (message: string, dueTime: Date, recurrence?: string) => Promise<void>;
+  onAdd: (message: string, urgency: UrgencyType, listType: ListType) => Promise<void>;
   syncing: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
 }
 
 const placeholderExamples = [
-  "call mom in 2 hours",
-  "meeting at 3pm",
-  "submit report tomorrow",
-  "dentist appointment friday 10am",
-  "pick up groceries in 30 min",
+  "Fix login bug",
+  "Review pull request",
+  "Call the dentist",
+  "Write documentation",
+  "Prepare presentation",
+];
+
+const urgencyOptions: { value: UrgencyType; label: string; color: string }[] = [
+  { value: "now", label: "Now", color: "text-red-400 border-red-500/50" },
+  { value: "today", label: "Today", color: "text-orange-400 border-orange-500/50" },
+  { value: "soon", label: "Soon", color: "text-yellow-400 border-yellow-500/50" },
+  { value: "whenever", label: "Whenever", color: "text-gray-400 border-gray-500/50" },
+];
+
+const listOptions: { value: ListType; label: string }[] = [
+  { value: "actual", label: "Actual" },
+  { value: "backlog", label: "Backlog" },
 ];
 
 export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) {
   const [text, setText] = useState("");
+  const [urgency, setUrgency] = useState<UrgencyType>("today");
+  const [listType, setListType] = useState<ListType>("actual");
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [displayedPlaceholder, setDisplayedPlaceholder] = useState("");
   const [isTyping, setIsTyping] = useState(true);
@@ -34,10 +48,9 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
       if (displayedPlaceholder.length < currentExample.length) {
         const timeout = setTimeout(() => {
           setDisplayedPlaceholder(currentExample.slice(0, displayedPlaceholder.length + 1));
-        }, 50 + Math.random() * 30); // Slight randomness for natural feel
+        }, 50 + Math.random() * 30);
         return () => clearTimeout(timeout);
       } else {
-        // Finished typing, wait then start erasing
         const timeout = setTimeout(() => setIsTyping(false), 2000);
         return () => clearTimeout(timeout);
       }
@@ -48,7 +61,6 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
         }, 30);
         return () => clearTimeout(timeout);
       } else {
-        // Finished erasing, move to next example
         setPlaceholderIndex((prev) => (prev + 1) % placeholderExamples.length);
         setIsTyping(true);
       }
@@ -57,12 +69,8 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
 
   const handleSubmit = async () => {
     if (!text.trim() || syncing) return;
-
-    const parsed = parseNaturalTime(text);
-    if (parsed) {
-      await onAdd(parsed.message, parsed.dueTime);
-      setText("");
-    }
+    await onAdd(text.trim(), urgency, listType);
+    setText("");
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -73,6 +81,7 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
 
   return (
     <div className="space-y-2">
+      {/* Main input row */}
       <div className="flex gap-2">
         <input
           ref={inputRef as RefObject<HTMLInputElement>}
@@ -100,6 +109,45 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
             <span className="text-xl">+</span>
           )}
         </button>
+      </div>
+
+      {/* Urgency and List selectors row */}
+      <div className="flex gap-4 items-center">
+        {/* Urgency selector */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-500 mr-1">Urgency:</span>
+          {urgencyOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setUrgency(option.value)}
+              className={`px-2 py-1 text-xs rounded border transition-all ${
+                urgency === option.value
+                  ? `${option.color} bg-dark-600`
+                  : "text-gray-500 border-transparent hover:text-gray-300"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {/* List type selector */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-500 mr-1">List:</span>
+          {listOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setListType(option.value)}
+              className={`px-2 py-1 text-xs rounded border transition-all ${
+                listType === option.value
+                  ? "text-accent-blue border-accent-blue/50 bg-dark-600"
+                  : "text-gray-500 border-transparent hover:text-gray-300"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

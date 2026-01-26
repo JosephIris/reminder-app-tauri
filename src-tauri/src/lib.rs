@@ -15,7 +15,8 @@ use tauri::{
     WebviewWindowBuilder,
 };
 use storage::{Storage, OAuthCredentials};
-use reminder::Reminder;
+use reminder::{Reminder, Urgency, ListType};
+use chrono::{Datelike, Timelike};
 
 /// Monitor Windows display changes and power events to reposition the reminder bar
 /// Listens for WM_DISPLAYCHANGE (resolution/monitor changes) and WM_POWERBROADCAST (resume from sleep)
@@ -131,6 +132,80 @@ fn monitor_display_changes(app_handle: tauri::AppHandle) {
 // Counter for notification window positioning
 static NOTIFICATION_COUNT: AtomicU32 = AtomicU32::new(0);
 
+// Organization prompt state - tracks which prompt slots have been triggered today
+// Format: (day_of_year, triggered_8am, triggered_1pm, triggered_6pm)
+static ORGANIZE_PROMPT_STATE: Mutex<Option<(u32, bool, bool, bool)>> = Mutex::new(None);
+
+/// Organization prompt scheduler - checks every minute and triggers at 8 AM, 1 PM, 6 PM
+fn start_organize_prompt_scheduler(app_handle: tauri::AppHandle) {
+    use chrono::{Local, Timelike};
+    use std::thread;
+    use std::time::Duration;
+
+    thread::spawn(move || {
+        loop {
+            // Sleep for 1 minute between checks
+            thread::sleep(Duration::from_secs(60));
+
+            let now = Local::now();
+            let hour = now.hour();
+            let minute = now.minute();
+            let day = now.ordinal();
+
+            // Only trigger during the first 5 minutes of the trigger hours
+            if minute >= 5 {
+                continue;
+            }
+
+            // Check if this is a trigger time (8, 13, 18)
+            let is_trigger_time = hour == 8 || hour == 13 || hour == 18;
+            if !is_trigger_time {
+                continue;
+            }
+
+            // Check if already triggered for this slot today
+            let should_trigger = {
+                let mut state = ORGANIZE_PROMPT_STATE.lock().unwrap();
+                let current = state.get_or_insert((day, false, false, false));
+
+                // Reset if new day
+                if current.0 != day {
+                    *current = (day, false, false, false);
+                }
+
+                // Determine which slot and if already triggered
+                let (slot_triggered, slot_index) = match hour {
+                    8 => (current.1, 1),
+                    13 => (current.2, 2),
+                    18 => (current.3, 3),
+                    _ => continue,
+                };
+
+                if !slot_triggered {
+                    // Mark as triggered
+                    match slot_index {
+                        1 => current.1 = true,
+                        2 => current.2 = true,
+                        3 => current.3 = true,
+                        _ => {}
+                    }
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if should_trigger {
+                println!("Organization prompt triggered at {:02}:{:02}", hour, minute);
+                // Emit event to frontend
+                if let Err(e) = app_handle.emit("organization-prompt", ()) {
+                    println!("Failed to emit organization-prompt: {:?}", e);
+                }
+            }
+        }
+    });
+}
+
 pub struct AppState {
     pub storage: Mutex<Storage>,
 }
@@ -149,20 +224,84 @@ fn get_pending_reminders(state: tauri::State<AppState>) -> Result<Vec<Reminder>,
 }
 
 #[tauri::command]
+fn get_actual_reminders(state: tauri::State<AppState>) -> Result<Vec<Reminder>, String> {
+    let storage = state.lock_storage();
+    Ok(storage.get_actual_reminders())
+}
+
+#[tauri::command]
+fn get_backlog_reminders(state: tauri::State<AppState>) -> Result<Vec<Reminder>, String> {
+    let storage = state.lock_storage();
+    Ok(storage.get_backlog_reminders())
+}
+
+#[tauri::command]
 fn get_completed_reminders(state: tauri::State<AppState>) -> Result<Vec<Reminder>, String> {
     let storage = state.lock_storage();
     Ok(storage.get_completed_reminders())
 }
 
 #[tauri::command]
+fn get_completion_stats(state: tauri::State<AppState>) -> Result<(usize, usize), String> {
+    let storage = state.lock_storage();
+    Ok(storage.get_completion_stats())
+}
+
+#[tauri::command]
+fn get_historical_stats(
+    state: tauri::State<AppState>,
+) -> Result<(Vec<(String, usize)>, Vec<usize>, Vec<usize>, usize), String> {
+    let storage = state.lock_storage();
+    Ok(storage.get_historical_stats())
+}
+
+#[tauri::command]
+fn dismiss_organize_prompt() -> Result<(), String> {
+    use chrono::{Local, Timelike};
+
+    let now = Local::now();
+    let day = now.ordinal();
+    let hour = now.hour();
+
+    let mut state = ORGANIZE_PROMPT_STATE.lock().unwrap();
+    let current = state.get_or_insert((day, false, false, false));
+
+    // Reset if new day
+    if current.0 != day {
+        *current = (day, false, false, false);
+    }
+
+    // Mark the current slot as dismissed based on hour
+    if hour < 13 {
+        current.1 = true; // 8 AM slot
+    } else if hour < 18 {
+        current.2 = true; // 1 PM slot
+    } else {
+        current.3 = true; // 6 PM slot
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn add_reminder(
     state: tauri::State<AppState>,
     message: String,
-    due_time: String,
-    recurrence: String,
+    urgency: String,
+    list_type: String,
 ) -> Result<i64, String> {
     let mut storage = state.lock_storage();
-    let reminder = Reminder::new(message, due_time, recurrence);
+    let urgency_enum = match urgency.as_str() {
+        "now" => Urgency::Now,
+        "today" => Urgency::Today,
+        "soon" => Urgency::Soon,
+        _ => Urgency::Whenever,
+    };
+    let list_type_enum = match list_type.as_str() {
+        "backlog" => ListType::Backlog,
+        _ => ListType::Actual,
+    };
+    let reminder = Reminder::new(message, urgency_enum, list_type_enum);
     storage.add_reminder(reminder)
 }
 
@@ -171,11 +310,46 @@ fn update_reminder(
     state: tauri::State<AppState>,
     id: i64,
     message: String,
-    due_time: String,
-    recurrence: String,
+    urgency: String,
 ) -> Result<(), String> {
     let mut storage = state.lock_storage();
-    storage.update_reminder(id, message, due_time, recurrence)
+    let urgency_enum = match urgency.as_str() {
+        "now" => Urgency::Now,
+        "today" => Urgency::Today,
+        "soon" => Urgency::Soon,
+        _ => Urgency::Whenever,
+    };
+    storage.update_reminder(id, message, urgency_enum)
+}
+
+#[tauri::command]
+fn move_reminder(
+    state: tauri::State<AppState>,
+    id: i64,
+    to_list: String,
+) -> Result<(), String> {
+    let mut storage = state.lock_storage();
+    let list_type = match to_list.as_str() {
+        "backlog" => ListType::Backlog,
+        _ => ListType::Actual,
+    };
+    storage.move_reminder(id, list_type)
+}
+
+#[tauri::command]
+fn set_urgency(
+    state: tauri::State<AppState>,
+    id: i64,
+    urgency: String,
+) -> Result<(), String> {
+    let mut storage = state.lock_storage();
+    let urgency_enum = match urgency.as_str() {
+        "now" => Urgency::Now,
+        "today" => Urgency::Today,
+        "soon" => Urgency::Soon,
+        _ => Urgency::Whenever,
+    };
+    storage.set_urgency(id, urgency_enum)
 }
 
 #[tauri::command]
@@ -194,12 +368,6 @@ fn complete_reminder(state: tauri::State<AppState>, id: i64) -> Result<(), Strin
 fn uncomplete_reminder(state: tauri::State<AppState>, id: i64) -> Result<(), String> {
     let mut storage = state.lock_storage();
     storage.uncomplete_reminder(id)
-}
-
-#[tauri::command]
-fn snooze_reminder(state: tauri::State<AppState>, id: i64, minutes: i64) -> Result<(), String> {
-    let mut storage = state.lock_storage();
-    storage.snooze_reminder(id, minutes)
 }
 
 #[tauri::command]
@@ -897,17 +1065,29 @@ pub fn run() {
                 });
             }
 
+            // Start organization prompt scheduler
+            {
+                let app_handle = app.handle().clone();
+                start_organize_prompt_scheduler(app_handle);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_pending_reminders,
+            get_actual_reminders,
+            get_backlog_reminders,
             get_completed_reminders,
+            get_completion_stats,
+            get_historical_stats,
+            dismiss_organize_prompt,
             add_reminder,
             update_reminder,
+            move_reminder,
+            set_urgency,
             delete_reminder,
             complete_reminder,
             uncomplete_reminder,
-            snooze_reminder,
             reorder_reminders,
             sync_to_cloud_background,
             refresh_from_cloud,

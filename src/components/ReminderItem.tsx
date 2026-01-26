@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Reminder } from "../types";
-import { formatTimeWithAbsolute, getUrgencyLevel } from "../utils/time";
+import type { Reminder, UrgencyType, ListType } from "../types";
 import "./ReminderItem.css";
 
 interface ReminderItemProps {
@@ -11,17 +10,18 @@ interface ReminderItemProps {
   isDragOver?: boolean;
   onComplete: (id: number) => void;
   onDelete: (id: number) => void;
-  onSnooze: (id: number, minutes: number) => void;
   onEdit: (reminder: Reminder) => void;
+  onMove?: (id: number, toList: ListType) => void;
+  onSetUrgency?: (id: number, urgency: UrgencyType) => void;
   onFocus?: (id: number | null) => void;
   onMouseDown?: (e: React.MouseEvent) => void;
 }
 
-const urgencyColors = {
-  overdue: "text-red-400 bg-red-500/20",
-  urgent: "text-orange-400 bg-orange-500/20",
-  soon: "text-yellow-400 bg-yellow-500/20",
-  normal: "text-gray-400 bg-dark-600",
+const urgencyConfig: Record<UrgencyType, { label: string; color: string; bgColor: string }> = {
+  now: { label: "NOW", color: "text-red-400", bgColor: "bg-red-500/20" },
+  today: { label: "Today", color: "text-orange-400", bgColor: "bg-orange-500/20" },
+  soon: { label: "Soon", color: "text-yellow-400", bgColor: "bg-yellow-500/20" },
+  whenever: { label: "Whenever", color: "text-gray-400", bgColor: "bg-dark-600" },
 };
 
 export function ReminderItem({
@@ -32,17 +32,19 @@ export function ReminderItem({
   isDragOver,
   onComplete,
   onDelete,
-  onSnooze,
   onEdit,
+  onMove,
+  onSetUrgency,
   onFocus,
   onMouseDown,
 }: ReminderItemProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [showUrgencyMenu, setShowUrgencyMenu] = useState(false);
   const itemRef = useRef<HTMLDivElement>(null);
-  const dueTime = new Date(reminder.due_time);
-  const urgency = getUrgencyLevel(dueTime);
-  const { relative, absolute } = formatTimeWithAbsolute(dueTime);
+  const urgencyMenuRef = useRef<HTMLDivElement>(null);
+
+  const urgency = urgencyConfig[reminder.urgency] || urgencyConfig.whenever;
 
   const handleComplete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -60,16 +62,49 @@ export function ReminderItem({
     }
   }, [isFocused]);
 
+  // Close urgency menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (urgencyMenuRef.current && !urgencyMenuRef.current.contains(e.target as Node)) {
+        setShowUrgencyMenu(false);
+      }
+    };
+    if (showUrgencyMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showUrgencyMenu]);
+
   const handleClick = () => {
     if (onFocus) {
       onFocus(isFocused ? null : reminder.id);
     }
   };
 
+  const handleUrgencyClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowUrgencyMenu(!showUrgencyMenu);
+  };
+
+  const handleUrgencySelect = (newUrgency: UrgencyType) => {
+    if (onSetUrgency && newUrgency !== reminder.urgency) {
+      onSetUrgency(reminder.id, newUrgency);
+    }
+    setShowUrgencyMenu(false);
+  };
+
+  const handleMoveClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onMove) {
+      const targetList: ListType = reminder.list_type === "actual" ? "backlog" : "actual";
+      onMove(reminder.id, targetList);
+    }
+  };
+
   return (
     <div
       ref={itemRef}
-      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${urgency === "urgent" ? "pulse-urgent" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
+      className={`reminder-item-wrapper ${isFocused ? "focused" : ""} ${isLeaving ? "leaving" : ""} ${reminder.urgency === "now" ? "pulse-urgent" : ""} ${isDragging ? "dragging" : ""} ${isDragOver ? "drag-over" : ""}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onDoubleClick={() => onEdit(reminder)}
@@ -80,31 +115,44 @@ export function ReminderItem({
         {/* Message */}
         <p className="flex-1 text-white text-sm truncate">{reminder.message}</p>
 
-        {/* Time badge with urgency color */}
-        <div
-          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs whitespace-nowrap ${urgencyColors[urgency]}`}
-          title={`Due at ${absolute}`}
-        >
-          <span className="font-medium">{relative}</span>
-          <span className="opacity-60 text-[10px]">({absolute})</span>
+        {/* Urgency badge - clickable to change */}
+        <div className="relative" ref={urgencyMenuRef}>
+          <button
+            onClick={handleUrgencyClick}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs whitespace-nowrap transition-colors hover:opacity-80 ${urgency.color} ${urgency.bgColor}`}
+            title="Click to change urgency"
+          >
+            <span className="font-medium">{urgency.label}</span>
+          </button>
+
+          {/* Urgency dropdown menu */}
+          {showUrgencyMenu && (
+            <div className="absolute right-0 top-full mt-1 bg-dark-700 border border-dark-500 rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
+              {(Object.keys(urgencyConfig) as UrgencyType[]).map((key) => (
+                <button
+                  key={key}
+                  onClick={(e) => { e.stopPropagation(); handleUrgencySelect(key); }}
+                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-dark-600 transition-colors ${urgencyConfig[key].color} ${reminder.urgency === key ? "bg-dark-600" : ""}`}
+                >
+                  {urgencyConfig[key].label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Actions - show on hover or focus */}
         <div className={`flex items-center gap-1 transition-opacity duration-200 ${isHovered || isFocused ? "opacity-100" : "opacity-0"}`}>
-          <button
-            onClick={(e) => { e.stopPropagation(); onSnooze(reminder.id, 15); }}
-            className="px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-dark-600 rounded transition-colors active:scale-90"
-            title="Snooze 15min"
-          >
-            15
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onSnooze(reminder.id, 60); }}
-            className="px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-dark-600 rounded transition-colors active:scale-90"
-            title="Snooze 1hr"
-          >
-            60
-          </button>
+          {/* Move to actual/backlog button */}
+          {onMove && (
+            <button
+              onClick={handleMoveClick}
+              className="px-1.5 py-0.5 text-[10px] text-gray-400 hover:text-white hover:bg-dark-600 rounded transition-colors active:scale-90"
+              title={reminder.list_type === "actual" ? "Move to backlog" : "Move to actual"}
+            >
+              {reminder.list_type === "actual" ? "→BL" : "→AC"}
+            </button>
+          )}
           <button
             onClick={handleComplete}
             disabled={isCompleting}

@@ -51,6 +51,75 @@
         margin: 0;
       }
 
+      .selectors {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .selector-group {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .selector-label {
+        color: #52525b;
+        font-size: 10px;
+        margin-right: 2px;
+      }
+
+      .selector-btn {
+        background: #27272a;
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        padding: 4px 8px;
+        color: #a1a1aa;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .selector-btn:hover {
+        background: #3f3f46;
+        color: #fafafa;
+      }
+
+      .selector-btn.selected {
+        border-color: currentColor;
+      }
+
+      .selector-btn.urgency-now.selected {
+        color: #f87171;
+        background: rgba(248, 113, 113, 0.15);
+      }
+
+      .selector-btn.urgency-today.selected {
+        color: #fb923c;
+        background: rgba(251, 146, 60, 0.15);
+      }
+
+      .selector-btn.urgency-soon.selected {
+        color: #facc15;
+        background: rgba(250, 204, 21, 0.15);
+      }
+
+      .selector-btn.urgency-whenever.selected {
+        color: #a1a1aa;
+        background: rgba(161, 161, 170, 0.15);
+      }
+
+      .selector-btn.list-actual.selected {
+        color: #60a5fa;
+        background: rgba(96, 165, 250, 0.15);
+      }
+
+      .selector-btn.list-backlog.selected {
+        color: #a1a1aa;
+        background: rgba(161, 161, 170, 0.15);
+      }
+
       .input-wrapper {
         position: relative;
         padding: 2px;
@@ -143,7 +212,19 @@
             />
           </div>
         </div>
-        <p class="hint-text">Try: "call mom in 2 hours" or "meeting at 3pm"</p>
+        <div class="selectors">
+          <div class="selector-group" id="urgency-group">
+            <button class="selector-btn urgency-now" data-value="now">Now</button>
+            <button class="selector-btn urgency-today selected" data-value="today">Today</button>
+            <button class="selector-btn urgency-soon" data-value="soon">Soon</button>
+            <button class="selector-btn urgency-whenever" data-value="whenever">Whenever</button>
+          </div>
+          <div class="selector-group" id="list-group">
+            <button class="selector-btn list-actual selected" data-value="actual">Actual</button>
+            <button class="selector-btn list-backlog" data-value="backlog">Backlog</button>
+          </div>
+        </div>
+        <p class="hint-text">Press Enter to add</p>
       </div>
     </div>
 
@@ -176,6 +257,12 @@
         let isBusy = false;
 
         const inputBox = document.querySelector('.input-box');
+        const urgencyGroup = document.getElementById('urgency-group');
+        const listGroup = document.getElementById('list-group');
+
+        // State
+        let selectedUrgency = 'today';
+        let selectedListType = 'actual';
 
         console.log('Quick add initialized, window:', win.label);
 
@@ -183,6 +270,35 @@
         input.value = '';
         input.disabled = false;
         inputBox.classList.remove('saving');
+
+        // Setup selector button handlers
+        function setupSelectors() {
+          // Urgency buttons
+          urgencyGroup.querySelectorAll('.selector-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              selectedUrgency = btn.dataset.value;
+              urgencyGroup.querySelectorAll('.selector-btn').forEach(b => b.classList.remove('selected'));
+              btn.classList.add('selected');
+              input.focus();
+            });
+          });
+
+          // List type buttons
+          listGroup.querySelectorAll('.selector-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              selectedListType = btn.dataset.value;
+              listGroup.querySelectorAll('.selector-btn').forEach(b => b.classList.remove('selected'));
+              btn.classList.add('selected');
+              input.focus();
+            });
+          });
+        }
+
+        setupSelectors();
 
         // Aggressive focus strategy for Windows
         async function focusInput() {
@@ -202,77 +318,6 @@
         setTimeout(focusInput, 100);
         setTimeout(focusInput, 200);
         setTimeout(focusInput, 500);
-
-        // Parse natural time from text
-        function parseNaturalTime(text) {
-          const lowerText = text.toLowerCase().trim();
-
-          // Pattern: "message in X minutes/hours/days"
-          const inPattern = /(.+?)\s+in\s+(\d+)\s*(min(?:ute)?s?|hours?|days?|h|m|d)/i;
-          const inMatch = lowerText.match(inPattern);
-
-          if (inMatch) {
-            const message = inMatch[1].trim();
-            const amount = parseInt(inMatch[2]);
-            const unit = inMatch[3].toLowerCase();
-            const now = new Date();
-            let ms = 0;
-
-            if (unit.startsWith('m')) ms = amount * 60 * 1000;
-            else if (unit.startsWith('h')) ms = amount * 60 * 60 * 1000;
-            else if (unit.startsWith('d')) ms = amount * 24 * 60 * 60 * 1000;
-
-            return {
-              message: message.charAt(0).toUpperCase() + message.slice(1),
-              dueTime: new Date(now.getTime() + ms)
-            };
-          }
-
-          // Pattern: "message at HH:MM am/pm"
-          const atPattern = /(.+?)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
-          const atMatch = lowerText.match(atPattern);
-
-          if (atMatch) {
-            const message = atMatch[1].trim();
-            let hours = parseInt(atMatch[2]);
-            const minutes = atMatch[3] ? parseInt(atMatch[3]) : 0;
-            const meridiem = atMatch[4]?.toLowerCase();
-
-            if (meridiem === 'pm' && hours < 12) hours += 12;
-            if (meridiem === 'am' && hours === 12) hours = 0;
-
-            const now = new Date();
-            const dueTime = new Date(now);
-            dueTime.setHours(hours, minutes, 0, 0);
-
-            if (dueTime <= now) {
-              dueTime.setDate(dueTime.getDate() + 1);
-            }
-
-            return {
-              message: message.charAt(0).toUpperCase() + message.slice(1),
-              dueTime
-            };
-          }
-
-          // Pattern: "message tomorrow"
-          const tomorrowPattern = /(.+?)\s+tomorrow/i;
-          const tomorrowMatch = lowerText.match(tomorrowPattern);
-
-          if (tomorrowMatch) {
-            const message = tomorrowMatch[1].trim();
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            tomorrow.setHours(9, 0, 0, 0);
-
-            return {
-              message: message.charAt(0).toUpperCase() + message.slice(1),
-              dueTime: tomorrow
-            };
-          }
-
-          return null;
-        }
 
         // Close window using destroy() to force close without events
         async function closeWindow() {
@@ -295,7 +340,7 @@
         // Submit reminder
         async function handleSubmit() {
           const text = input.value.trim();
-          console.log('Submit:', text);
+          console.log('Submit:', text, 'urgency:', selectedUrgency, 'list:', selectedListType);
 
           if (!text || isBusy) return;
 
@@ -303,27 +348,13 @@
           input.disabled = true;
           inputBox.classList.add('saving');
 
-          const parsed = parseNaturalTime(text);
-          console.log('Parsed:', parsed);
-
-          // Determine message and due time
-          let message, dueTime;
-
-          if (parsed) {
-            message = parsed.message;
-            dueTime = parsed.dueTime;
-          } else {
-            // Default: 5 minutes from now with full text as message
-            message = text.charAt(0).toUpperCase() + text.slice(1);
-            dueTime = new Date(Date.now() + 5 * 60 * 1000);
-            console.log('No time pattern found, defaulting to 5 minutes');
-          }
+          const message = text.charAt(0).toUpperCase() + text.slice(1);
 
           try {
             await invoke("add_reminder", {
               message: message,
-              dueTime: dueTime.toISOString(),
-              recurrence: ""
+              urgency: selectedUrgency,
+              listType: selectedListType
             });
             console.log('Reminder added successfully');
           } catch (e) {

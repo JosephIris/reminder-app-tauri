@@ -1,16 +1,15 @@
-export type RecurrenceType = "none" | "daily" | "weekly";
+export type UrgencyType = "now" | "today" | "soon" | "whenever";
+export type ListType = "actual" | "backlog";
 
 export interface Reminder {
   id: number;
   message: string;
-  due_time: string; // ISO string
+  urgency: UrgencyType;
+  list_type: ListType;
   created_at: string; // ISO string
-  recurrence: RecurrenceType;
   is_completed: boolean;
-  is_snoozed: boolean;
-  original_due_time?: string; // ISO string
   completed_at?: string; // ISO string
-  sort_order?: number;
+  sort_order: number;
 }
 
 export interface ReminderStore {
