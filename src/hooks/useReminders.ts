@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import type { Reminder, UrgencyType, ListType } from "../types";
@@ -11,6 +11,12 @@ export function useReminders() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [leavingIds, setLeavingIds] = useState<Set<number>>(new Set());
+
+  // Refs for stable callback access to current state
+  const pendingRef = useRef(pending);
+  const completedRef = useRef(completed);
+  pendingRef.current = pending;
+  completedRef.current = completed;
 
   // Derived state: actual and backlog lists
   const actual = useMemo(() =>
@@ -60,9 +66,8 @@ export function useReminders() {
     setPending(prev => [tempReminder, ...prev]);
     showToast("Task added", "success");
 
-    // Persist in background
+    // Persist in background - NO refresh to avoid overwriting other optimistic updates
     invoke("add_reminder", { message, urgency, listType })
-      .then(() => refresh()) // Get real ID from backend
       .then(() => emit("refresh-reminders"))
       .then(() => invoke("sync_to_cloud_background"))
       .catch((error) => {
@@ -70,11 +75,11 @@ export function useReminders() {
         showToast("Failed to add task", "error");
         setPending(prev => prev.filter(r => r.id !== tempId)); // Remove temp
       });
-  }, [refresh]);
+  }, []);
 
   const completeReminder = useCallback((id: number) => {
-    // Find the reminder before completing for undo
-    const reminder = pending.find(r => r.id === id);
+    // Find the reminder using ref for current state
+    const reminder = pendingRef.current.find(r => r.id === id);
     if (!reminder) return;
 
     // Start leaving animation
@@ -118,11 +123,11 @@ export function useReminders() {
         showToast("Failed to complete task", "error");
         refresh(); // Revert on error
       });
-  }, [refresh, pending]);
+  }, [refresh]);
 
   const deleteReminder = useCallback((id: number, skipAnimation = false) => {
-    // Find the reminder before deleting for potential restore
-    const reminder = pending.find(r => r.id === id) || completed.find(r => r.id === id);
+    // Find the reminder using refs for current state
+    const reminder = pendingRef.current.find(r => r.id === id) || completedRef.current.find(r => r.id === id);
 
     if (!skipAnimation) {
       // Start leaving animation
@@ -171,7 +176,7 @@ export function useReminders() {
         showToast("Failed to delete task", "error");
         refresh(); // Revert on error
       });
-  }, [refresh, pending, completed]);
+  }, [refresh]);
 
   const updateReminder = useCallback(async (id: number, message: string, urgency: UrgencyType) => {
     setSyncing(true);
