@@ -118,16 +118,6 @@ function App() {
     showBar();
   }, [loading]);
 
-  // Listen for refresh events from Rust backend
-  useEffect(() => {
-    const unlisten = listen("refresh-reminders", () => {
-      refresh();
-    });
-    return () => {
-      unlisten.then((fn) => fn()).catch(console.error);
-    };
-  }, [refresh]);
-
   // Listen for focus events (when window is shown)
   useEffect(() => {
     const unlisten = listen("tauri://focus", () => {
