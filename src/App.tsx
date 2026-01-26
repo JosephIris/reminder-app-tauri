@@ -99,34 +99,23 @@ function App() {
     await emit("focus-reminder", { id });
   }, [justFinishedDragActual, justFinishedDragBacklog]);
 
-  // Show/hide bar based on actual tasks
+  // Show bar once loaded (always visible, shows empty state when no tasks)
   useEffect(() => {
     if (loading) return;
 
-    const updateBar = async () => {
-      if (actual.length > 0) {
-        // Show bar if there are actual tasks
-        if (!barShownRef.current) {
-          try {
-            await invoke("show_reminder_bar");
-            barShownRef.current = true;
-          } catch (e) {
-            console.error("Failed to show reminder bar:", e);
-          }
-        }
-      } else if (barShownRef.current) {
-        // Hide bar when no actual tasks
+    const showBar = async () => {
+      if (!barShownRef.current) {
         try {
-          await invoke("hide_reminder_bar");
-          barShownRef.current = false;
+          await invoke("show_reminder_bar");
+          barShownRef.current = true;
         } catch (e) {
-          console.error("Failed to hide reminder bar:", e);
+          console.error("Failed to show reminder bar:", e);
         }
       }
     };
 
-    updateBar();
-  }, [actual, loading]);
+    showBar();
+  }, [loading]);
 
   // Listen for refresh events from Rust backend
   useEffect(() => {

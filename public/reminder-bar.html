@@ -294,10 +294,47 @@
       }
 
       .empty-state {
-        color: rgba(255, 255, 255, 0.35);
-        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 12px;
         padding: 0 8px;
         font-weight: 400;
+      }
+
+      .empty-state-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .empty-state-title {
+        color: rgba(255, 255, 255, 0.7);
+        font-weight: 500;
+      }
+
+      .empty-state-hint {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 11px;
+      }
+
+      .empty-state-btn {
+        background: rgba(99, 102, 241, 0.2);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        color: #818cf8;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .empty-state-btn:hover {
+        background: rgba(99, 102, 241, 0.3);
+        border-color: rgba(99, 102, 241, 0.5);
+        color: #a5b4fc;
       }
 
       .tooltip {
@@ -331,7 +368,13 @@
     </style>
   </head>
   <body>
-    <div class="empty-state">No tasks</div>
+    <div class="empty-state">
+      <div class="empty-state-text">
+        <span class="empty-state-title">Ready to focus</span>
+        <span class="empty-state-hint">Add tasks to get started</span>
+      </div>
+      <button class="empty-state-btn" id="open-list-btn">Open List</button>
+    </div>
     <div class="stats-section">
       <div class="stat-item today">
         <span class="count" id="stats-today">0</span>
@@ -950,6 +993,20 @@
 
       document.addEventListener('mousemove', handleDragMove);
       document.addEventListener('mouseup', handleDragEnd);
+
+      // Open list button handler
+      document.getElementById('open-list-btn').addEventListener('click', async () => {
+        try {
+          const { WebviewWindow } = window.__TAURI__.webviewWindow;
+          const mainWindow = await WebviewWindow.getByLabel('main');
+          if (mainWindow) {
+            await mainWindow.show();
+            await mainWindow.setFocus();
+          }
+        } catch (e) {
+          console.error('Failed to open main window:', e);
+        }
+      });
 
       render();
       fetchReminders();

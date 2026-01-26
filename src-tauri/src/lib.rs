@@ -567,9 +567,9 @@ async fn show_quick_add(app: tauri::AppHandle) -> Result<(), String> {
     let screen_position = primary.position();
     let scale_factor = primary.scale_factor();
 
-    // Window dimensions (40% bigger than original 400x56, plus room for hint text)
+    // Window dimensions (40% bigger than original 400x56, plus room for selectors and hint text)
     let width = 560u32;
-    let height = 100u32;
+    let height = 150u32;
 
     // Calculate logical screen dimensions
     let screen_width = (screen_size.width as f64 / scale_factor) as i32;

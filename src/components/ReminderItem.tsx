@@ -125,9 +125,9 @@ export function ReminderItem({
             <span className="font-medium">{urgency.label}</span>
           </button>
 
-          {/* Urgency dropdown menu */}
+          {/* Urgency dropdown menu - opens upward to avoid clipping */}
           {showUrgencyMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-dark-700 border border-dark-500 rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
+            <div className="absolute right-0 bottom-full mb-1 bg-dark-700 border border-dark-500 rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
               {(Object.keys(urgencyConfig) as UrgencyType[]).map((key) => (
                 <button
                   key={key}
