@@ -43,7 +43,8 @@ jobs:
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          # Only include updater JSON if signing keys are configured
+          includeUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
 
       - name: Upload standalone exe for auto-update
         uses: softprops/action-gh-release@v1
