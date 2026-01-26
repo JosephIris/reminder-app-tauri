@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import type { Reminder, UrgencyType, ListType } from "../types";
@@ -11,9 +11,6 @@ export function useReminders() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [leavingIds, setLeavingIds] = useState<Set<number>>(new Set());
-
-  // Store last deleted/completed for undo
-  const lastActionRef = useRef<{ type: "complete" | "delete"; reminder: Reminder } | null>(null);
 
   // Derived state: actual and backlog lists
   const actual = useMemo(() =>
@@ -44,30 +41,38 @@ export function useReminders() {
     }
   }, []);
 
-  const addReminder = useCallback(async (
+  const addReminder = useCallback((
     message: string,
     urgency: UrgencyType = "today",
     listType: ListType = "actual"
   ) => {
-    setSyncing(true);
-    try {
-      await invoke("add_reminder", {
-        message,
-        urgency,
-        listType,
+    // Optimistic update with temp ID
+    const tempId = -Date.now();
+    const tempReminder: Reminder = {
+      id: tempId,
+      message,
+      urgency,
+      list_type: listType,
+      is_completed: false,
+      created_at: new Date().toISOString(),
+      sort_order: listType === "actual" ? -1 : 9999,
+    };
+    setPending(prev => [tempReminder, ...prev]);
+    showToast("Task added", "success");
+
+    // Persist in background
+    invoke("add_reminder", { message, urgency, listType })
+      .then(() => refresh()) // Get real ID from backend
+      .then(() => emit("refresh-reminders"))
+      .then(() => invoke("sync_to_cloud_background"))
+      .catch((error) => {
+        console.error("Failed to add reminder:", error);
+        showToast("Failed to add task", "error");
+        setPending(prev => prev.filter(r => r.id !== tempId)); // Remove temp
       });
-      await refresh();
-      await emit("refresh-reminders");
-      showToast("Task added", "success");
-    } catch (error) {
-      console.error("Failed to add reminder:", error);
-      showToast("Failed to add task", "error");
-    } finally {
-      setSyncing(false);
-    }
   }, [refresh]);
 
-  const completeReminder = useCallback(async (id: number) => {
+  const completeReminder = useCallback((id: number) => {
     // Find the reminder before completing for undo
     const reminder = pending.find(r => r.id === id);
     if (!reminder) return;
@@ -75,21 +80,79 @@ export function useReminders() {
     // Start leaving animation
     setLeavingIds(prev => new Set(prev).add(id));
 
-    // Wait for animation
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Optimistic update after short delay for animation
+    setTimeout(() => {
+      setPending(prev => prev.filter(r => r.id !== id));
+      setCompleted(prev => [{
+        ...reminder,
+        is_completed: true,
+        completed_at: new Date().toISOString(),
+      }, ...prev]);
+      setLeavingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      // Update stats optimistically
+      setStats(prev => ({ today: prev.today + 1, week: prev.week + 1 }));
+    }, 300);
 
-    setSyncing(true);
-    try {
-      await invoke("complete_reminder", { id });
-      lastActionRef.current = { type: "complete", reminder };
-      await refresh();
-      await emit("refresh-reminders");
+    // Show toast with undo immediately
+    showToast("Completed", "success", async () => {
+      try {
+        await invoke("uncomplete_reminder", { id });
+        await refresh();
+        await emit("refresh-reminders");
+        showToast("Restored", "info");
+      } catch (e) {
+        console.error("Failed to undo:", e);
+      }
+    });
 
-      // Show toast with undo option
-      showToast("Completed", "success", async () => {
-        // Undo: uncomplete the reminder
+    // Persist in background
+    invoke("complete_reminder", { id })
+      .then(() => emit("refresh-reminders"))
+      .then(() => invoke("sync_to_cloud_background"))
+      .catch((error) => {
+        console.error("Failed to complete reminder:", error);
+        showToast("Failed to complete task", "error");
+        refresh(); // Revert on error
+      });
+  }, [refresh, pending]);
+
+  const deleteReminder = useCallback((id: number, skipAnimation = false) => {
+    // Find the reminder before deleting for potential restore
+    const reminder = pending.find(r => r.id === id) || completed.find(r => r.id === id);
+
+    if (!skipAnimation) {
+      // Start leaving animation
+      setLeavingIds(prev => new Set(prev).add(id));
+
+      // Optimistic update after animation
+      setTimeout(() => {
+        setPending(prev => prev.filter(r => r.id !== id));
+        setCompleted(prev => prev.filter(r => r.id !== id));
+        setLeavingIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 300);
+    } else {
+      // Immediate optimistic update
+      setPending(prev => prev.filter(r => r.id !== id));
+      setCompleted(prev => prev.filter(r => r.id !== id));
+    }
+
+    // Show toast with undo option immediately
+    if (reminder) {
+      showToast("Deleted", "info", async () => {
         try {
-          await invoke("uncomplete_reminder", { id });
+          await invoke("add_reminder", {
+            message: reminder.message,
+            urgency: reminder.urgency,
+            listType: reminder.list_type,
+          });
           await refresh();
           await emit("refresh-reminders");
           showToast("Restored", "info");
@@ -97,68 +160,17 @@ export function useReminders() {
           console.error("Failed to undo:", e);
         }
       });
-    } catch (error) {
-      console.error("Failed to complete reminder:", error);
-      showToast("Failed to complete task", "error");
-    } finally {
-      setSyncing(false);
-      setLeavingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
+    }
+
+    // Persist in background
+    invoke("delete_reminder", { id })
+      .then(() => emit("refresh-reminders"))
+      .then(() => invoke("sync_to_cloud_background"))
+      .catch((error) => {
+        console.error("Failed to delete reminder:", error);
+        showToast("Failed to delete task", "error");
+        refresh(); // Revert on error
       });
-    }
-  }, [refresh, pending]);
-
-  const deleteReminder = useCallback(async (id: number, skipAnimation = false) => {
-    // Find the reminder before deleting for potential restore
-    const reminder = pending.find(r => r.id === id) || completed.find(r => r.id === id);
-
-    if (!skipAnimation) {
-      // Start leaving animation
-      setLeavingIds(prev => new Set(prev).add(id));
-      // Wait for animation
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-
-    setSyncing(true);
-    try {
-      await invoke("delete_reminder", { id });
-      if (reminder) {
-        lastActionRef.current = { type: "delete", reminder };
-      }
-      await refresh();
-      await emit("refresh-reminders");
-
-      // Show toast with undo option (only if we have the reminder data)
-      if (reminder) {
-        showToast("Deleted", "info", async () => {
-          // Undo: re-add the reminder
-          try {
-            await invoke("add_reminder", {
-              message: reminder.message,
-              urgency: reminder.urgency,
-              listType: reminder.list_type,
-            });
-            await refresh();
-            await emit("refresh-reminders");
-            showToast("Restored", "info");
-          } catch (e) {
-            console.error("Failed to undo:", e);
-          }
-        });
-      }
-    } catch (error) {
-      console.error("Failed to delete reminder:", error);
-      showToast("Failed to delete task", "error");
-    } finally {
-      setSyncing(false);
-      setLeavingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
   }, [refresh, pending, completed]);
 
   const updateReminder = useCallback(async (id: number, message: string, urgency: UrgencyType) => {

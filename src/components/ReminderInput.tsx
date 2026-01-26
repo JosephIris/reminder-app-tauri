@@ -2,7 +2,7 @@ import { useState, useEffect, KeyboardEvent, RefObject } from "react";
 import type { UrgencyType, ListType } from "../types";
 
 interface ReminderInputProps {
-  onAdd: (message: string, urgency: UrgencyType, listType: ListType) => Promise<void>;
+  onAdd: (message: string, urgency: UrgencyType, listType: ListType) => void;
   syncing: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
 }
@@ -67,9 +67,9 @@ export function ReminderInput({ onAdd, syncing, inputRef }: ReminderInputProps) 
     }
   }, [displayedPlaceholder, isTyping, placeholderIndex]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!text.trim() || syncing) return;
-    await onAdd(text.trim(), urgency, listType);
+    onAdd(text.trim(), urgency, listType);
     setText("");
   };
 
