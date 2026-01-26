@@ -50,6 +50,7 @@ function App() {
   const [updateAvailable, setUpdateAvailable] = useState<{ version: string; download: () => Promise<void> } | null>(null);
   const [updating, setUpdating] = useState(false);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
+  const [authExpired, setAuthExpired] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Track if bar is currently shown
@@ -186,6 +187,22 @@ function App() {
     checkForUpdates();
   }, [checkForUpdates]);
 
+  // Check auth status on startup
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const [hasCreds, isLoggedIn, authValid] = await invoke<[boolean, boolean, boolean]>("check_auth_status");
+        // Show warning if user has credentials and is "logged in" but auth is not valid
+        if (hasCreds && isLoggedIn && !authValid) {
+          setAuthExpired(true);
+        }
+      } catch (e) {
+        console.log("Auth check skipped:", e);
+      }
+    };
+    checkAuth();
+  }, []);
+
   // Listen for focus-reminder event from the reminder bar
   useEffect(() => {
     const unlisten = listen<{ id: number | null }>("focus-reminder", (event) => {
@@ -228,6 +245,24 @@ function App() {
               className="px-3 py-1 bg-accent-blue hover:bg-blue-600 disabled:bg-dark-600 text-white text-sm rounded transition-colors"
             >
               {updating ? "Updating..." : "Update Now"}
+            </button>
+          </div>
+        )}
+
+        {/* Auth expired banner */}
+        {authExpired && (
+          <div className="mb-3 p-3 bg-orange-500/20 border border-orange-500/30 rounded-lg flex items-center justify-between">
+            <span className="text-sm text-white">
+              Cloud sync expired - tasks are only saved locally
+            </span>
+            <button
+              onClick={() => {
+                setShowSettings(true);
+                setAuthExpired(false);
+              }}
+              className="px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white text-sm rounded transition-colors"
+            >
+              Re-login
             </button>
           </div>
         )}

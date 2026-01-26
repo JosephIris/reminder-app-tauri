@@ -124,21 +124,6 @@ export function ReminderItem({
           >
             <span className="font-medium">{urgency.label}</span>
           </button>
-
-          {/* Urgency dropdown menu - opens upward to avoid clipping */}
-          {showUrgencyMenu && (
-            <div className="absolute right-0 bottom-full mb-1 bg-dark-700 border border-dark-500 rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
-              {(Object.keys(urgencyConfig) as UrgencyType[]).map((key) => (
-                <button
-                  key={key}
-                  onClick={(e) => { e.stopPropagation(); handleUrgencySelect(key); }}
-                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-dark-600 transition-colors ${urgencyConfig[key].color} ${reminder.urgency === key ? "bg-dark-600" : ""}`}
-                >
-                  {urgencyConfig[key].label}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Actions - show on hover or focus */}
@@ -182,6 +167,21 @@ export function ReminderItem({
           </button>
         </div>
       </div>
+
+      {/* Urgency dropdown menu - outside of inner div to avoid overflow clipping */}
+      {showUrgencyMenu && (
+        <div className="urgency-dropdown-menu">
+          {(Object.keys(urgencyConfig) as UrgencyType[]).map((key) => (
+            <button
+              key={key}
+              onClick={(e) => { e.stopPropagation(); handleUrgencySelect(key); }}
+              className={`w-full px-3 py-1.5 text-left text-xs hover:bg-dark-600 transition-colors ${urgencyConfig[key].color} ${reminder.urgency === key ? "bg-dark-600" : ""}`}
+            >
+              {urgencyConfig[key].label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

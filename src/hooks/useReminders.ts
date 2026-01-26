@@ -280,6 +280,26 @@ export function useReminders() {
     initAndSync();
   }, [refresh]);
 
+  // Periodic cloud sync every 5 minutes
+  useEffect(() => {
+    const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+    const periodicSync = async () => {
+      try {
+        const synced = await invoke<boolean>("refresh_from_cloud");
+        if (synced) {
+          await refresh();
+          console.log("Periodic sync completed");
+        }
+      } catch (e) {
+        console.log("Periodic sync skipped:", e);
+      }
+    };
+
+    const interval = setInterval(periodicSync, SYNC_INTERVAL);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
   return {
     pending,
     actual,

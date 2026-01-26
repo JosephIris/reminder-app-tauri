@@ -401,6 +401,28 @@ fn get_oauth_status(state: tauri::State<AppState>) -> Result<(bool, bool), Strin
     Ok(storage.get_oauth_status())
 }
 
+/// Check if auth is working by attempting a cloud operation
+/// Returns: (has_credentials, is_logged_in, auth_valid)
+#[tauri::command]
+fn check_auth_status(state: tauri::State<AppState>) -> Result<(bool, bool, bool), String> {
+    let mut storage = state.lock_storage();
+    let (has_creds, is_logged_in) = storage.get_oauth_status();
+
+    if !has_creds || !is_logged_in {
+        return Ok((has_creds, is_logged_in, false));
+    }
+
+    // Try to refresh from cloud to verify auth is working
+    match storage.refresh_from_cloud() {
+        Ok(_) => Ok((has_creds, is_logged_in, true)),
+        Err(e) => {
+            eprintln!("Auth validation failed: {}", e);
+            // Auth failed - likely expired
+            Ok((has_creds, is_logged_in, false))
+        }
+    }
+}
+
 #[tauri::command]
 fn save_oauth_credentials(
     state: tauri::State<AppState>,
@@ -1102,6 +1124,7 @@ pub fn run() {
             unregister_shortcuts,
             register_shortcuts,
             get_oauth_status,
+            check_auth_status,
             save_oauth_credentials,
             get_oauth_credentials,
             get_oauth_url,

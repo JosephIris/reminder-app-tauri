@@ -18,6 +18,71 @@ struct ReminderStore {
     completed: Vec<Reminder>,
 }
 
+/// Merge two ReminderStores, keeping all unique tasks and preferring newer versions for conflicts
+fn merge_stores(local: &ReminderStore, cloud: &ReminderStore) -> ReminderStore {
+    use std::collections::HashMap;
+
+    // Merge pending reminders
+    let mut pending_map: HashMap<i64, Reminder> = HashMap::new();
+
+    // Add all local pending
+    for r in &local.pending {
+        pending_map.insert(r.id, r.clone());
+    }
+
+    // Merge cloud pending - only add if not exists or if cloud version is newer
+    for r in &cloud.pending {
+        if let Some(existing) = pending_map.get(&r.id) {
+            // Compare and keep newer
+            let a_time = existing.completed_at.as_ref().unwrap_or(&existing.created_at);
+            let b_time = r.completed_at.as_ref().unwrap_or(&r.created_at);
+
+            if let (Ok(a_dt), Ok(b_dt)) = (
+                DateTime::parse_from_rfc3339(a_time),
+                DateTime::parse_from_rfc3339(b_time),
+            ) {
+                if b_dt > a_dt {
+                    pending_map.insert(r.id, r.clone());
+                }
+            }
+        } else {
+            // New task from cloud - add it
+            pending_map.insert(r.id, r.clone());
+        }
+    }
+
+    // Merge completed reminders
+    let mut completed_map: HashMap<i64, Reminder> = HashMap::new();
+
+    for r in &local.completed {
+        completed_map.insert(r.id, r.clone());
+    }
+
+    for r in &cloud.completed {
+        if !completed_map.contains_key(&r.id) {
+            completed_map.insert(r.id, r.clone());
+        }
+        // For completed items, also check if it exists in pending - if so, it was completed
+        if pending_map.contains_key(&r.id) {
+            pending_map.remove(&r.id);
+            completed_map.insert(r.id, r.clone());
+        }
+    }
+
+    // Also check local completed against cloud pending
+    for r in &local.completed {
+        if let Some(_) = cloud.pending.iter().find(|cr| cr.id == r.id) {
+            // Local has it as completed, cloud has as pending - keep as completed
+            pending_map.remove(&r.id);
+        }
+    }
+
+    ReminderStore {
+        pending: pending_map.into_values().collect(),
+        completed: completed_map.into_values().collect(),
+    }
+}
+
 // Legacy data structures for migration
 #[derive(Debug, Clone, Deserialize)]
 struct LegacyReminder {
@@ -194,6 +259,15 @@ impl Storage {
     }
 
     fn init_drive(&mut self) -> Result<(), String> {
+        // IMPORTANT: Load local data first so we can merge with cloud
+        // This prevents data loss if cloud has stale data
+        if let Err(e) = self.load_local() {
+            eprintln!("No local data to load ({}), will use cloud data only", e);
+        } else {
+            eprintln!("Loaded {} local pending, {} local completed",
+                self.data.pending.len(), self.data.completed.len());
+        }
+
         // Check for token.json in app data
         let token_path = self.app_data_path.join("token.json");
         if !token_path.exists() {
@@ -230,11 +304,19 @@ impl Storage {
             self.find_or_create_drive_file()?;
         }
 
-        // Try to load from Drive, refresh token if needed
+        // Try to load from Drive (this will merge with local data)
         if let Err(e) = self.load_from_drive() {
             eprintln!("Drive load failed: {}, trying token refresh...", e);
             self.refresh_access_token()?;
             self.load_from_drive()?;
+        }
+
+        // Push merged data back to cloud and local
+        if let Err(e) = self.save_to_drive() {
+            eprintln!("Warning: Failed to sync merged data to cloud: {}", e);
+        }
+        if let Err(e) = self.save_local() {
+            eprintln!("Warning: Failed to save merged data locally: {}", e);
         }
 
         eprintln!("Drive sync initialized successfully. Found {} pending, {} completed reminders.",
@@ -395,24 +477,35 @@ impl Storage {
         eprintln!("Drive content received: {} bytes", content.len());
 
         // Try to parse as new format first
-        if let Ok(data) = serde_json::from_str::<ReminderStore>(&content) {
+        let cloud_data = if let Ok(data) = serde_json::from_str::<ReminderStore>(&content) {
             eprintln!("Parsed {} pending, {} completed reminders from Drive",
                 data.pending.len(), data.completed.len());
-            self.data = data;
+            data
         } else {
             // Try migration from legacy format
             if let Some(migrated) = try_migrate_legacy_data(&content, None) {
                 eprintln!("Migrated legacy data from Drive");
-                self.data = migrated;
-                // Save migrated data back to Drive
-                if let Err(e) = self.save_to_drive() {
-                    eprintln!("Warning: Failed to save migrated data to Drive: {}", e);
-                }
+                migrated
             } else {
-                eprintln!("Failed to parse Drive content, using default");
-                self.data = ReminderStore::default();
+                eprintln!("Failed to parse Drive content, using empty");
+                ReminderStore::default()
             }
+        };
+
+        // Merge cloud data with local data instead of overwriting
+        let local_count = self.data.pending.len() + self.data.completed.len();
+        let cloud_count = cloud_data.pending.len() + cloud_data.completed.len();
+
+        if local_count > 0 && cloud_count > 0 {
+            eprintln!("Merging {} local items with {} cloud items", local_count, cloud_count);
+            self.data = merge_stores(&self.data, &cloud_data);
+            eprintln!("After merge: {} pending, {} completed",
+                self.data.pending.len(), self.data.completed.len());
+        } else if cloud_count > 0 {
+            // No local data, use cloud
+            self.data = cloud_data;
         }
+        // If only local data exists, keep it
 
         Ok(())
     }
@@ -748,14 +841,17 @@ impl Storage {
             return Ok(false);
         }
 
-        // Try to reload from Drive
+        // Try to reload from Drive (this merges with local data)
         if let Err(_) = self.load_from_drive() {
             // Token might be expired, try refresh
             self.refresh_access_token()?;
             self.load_from_drive()?;
         }
 
-        // Also save locally as backup
+        // Push merged data back to cloud and local
+        if let Err(e) = self.save_to_drive() {
+            eprintln!("Warning: Failed to sync merged data to cloud: {}", e);
+        }
         self.save_local()?;
 
         Ok(true)
