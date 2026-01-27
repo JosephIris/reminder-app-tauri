@@ -73,6 +73,16 @@ export function useReminders() {
         setPending(prev => prev.map(r =>
           r.id === tempId ? { ...r, id: realId } : r
         ));
+        // Also update leavingIds if this task happens to be animating
+        setLeavingIds(prev => {
+          if (prev.has(tempId)) {
+            const next = new Set(prev);
+            next.delete(tempId);
+            next.add(realId);
+            return next;
+          }
+          return prev;
+        });
         return emit("refresh-reminders");
       })
       .then(() => invoke("sync_to_cloud_background"))
@@ -88,25 +98,37 @@ export function useReminders() {
     const reminder = pendingRef.current.find(r => r.id === id);
     if (!reminder) return;
 
+    // For temp IDs (negative), we need to track by content since ID might change
+    const isTemp = id < 0;
+    const matchKey = isTemp ? `${reminder.message}|${reminder.created_at}` : null;
+
     // Start leaving animation
     setLeavingIds(prev => new Set(prev).add(id));
 
-    // Optimistic update after short delay for animation
-    setTimeout(() => {
-      setPending(prev => prev.filter(r => r.id !== id));
-      setCompleted(prev => [{
-        ...reminder,
-        is_completed: true,
-        completed_at: new Date().toISOString(),
-      }, ...prev]);
-      setLeavingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      // Update stats optimistically
-      setStats(prev => ({ today: prev.today + 1, week: prev.week + 1 }));
-    }, 300);
+    // IMMEDIATE optimistic update - no delay!
+    // Use functional updates to get latest state
+    setPending(prev => {
+      if (isTemp && matchKey) {
+        // For temp IDs, match by content in case ID was reconciled
+        return prev.filter(r => `${r.message}|${r.created_at}` !== matchKey);
+      }
+      return prev.filter(r => r.id !== id);
+    });
+
+    setCompleted(prev => [{
+      ...reminder,
+      is_completed: true,
+      completed_at: new Date().toISOString(),
+    }, ...prev]);
+
+    setLeavingIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+    // Update stats optimistically
+    setStats(prev => ({ today: prev.today + 1, week: prev.week + 1 }));
 
     // Show toast with undo immediately
     showToast("Completed", "success", async () => {
@@ -117,42 +139,61 @@ export function useReminders() {
         showToast("Restored", "info");
       } catch (e) {
         console.error("Failed to undo:", e);
+        // If undo failed (e.g., temp ID), just refresh to get correct state
+        await refresh();
       }
     });
 
-    // Persist in background
-    invoke("complete_reminder", { id })
-      .then(() => emit("refresh-reminders"))
-      .then(() => invoke("sync_to_cloud_background"))
-      .catch((error) => {
-        console.error("Failed to complete reminder:", error);
-        showToast("Failed to complete task", "error");
-        refresh(); // Revert on error
-      });
+    // Persist in background - only if not a temp ID
+    // Temp IDs don't exist in backend yet, so completing them is a no-op on backend
+    if (!isTemp) {
+      invoke("complete_reminder", { id })
+        .then(() => emit("refresh-reminders"))
+        .then(() => invoke("sync_to_cloud_background"))
+        .catch((error) => {
+          console.error("Failed to complete reminder:", error);
+          showToast("Failed to complete task", "error");
+          refresh(); // Revert on error
+        });
+    } else {
+      // For temp IDs, just emit refresh for the bar
+      emit("refresh-reminders").catch(() => {});
+    }
   }, [refresh]);
 
   const deleteReminder = useCallback((id: number, skipAnimation = false) => {
     // Find the reminder using refs for current state
     const reminder = pendingRef.current.find(r => r.id === id) || completedRef.current.find(r => r.id === id);
 
+    // For temp IDs (negative), track by content
+    const isTemp = id < 0;
+    const matchKey = reminder ? `${reminder.message}|${reminder.created_at}` : null;
+
     if (!skipAnimation) {
       // Start leaving animation
       setLeavingIds(prev => new Set(prev).add(id));
+    }
 
-      // Optimistic update after animation
-      setTimeout(() => {
-        setPending(prev => prev.filter(r => r.id !== id));
-        setCompleted(prev => prev.filter(r => r.id !== id));
-        setLeavingIds(prev => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-      }, 300);
-    } else {
-      // Immediate optimistic update
-      setPending(prev => prev.filter(r => r.id !== id));
-      setCompleted(prev => prev.filter(r => r.id !== id));
+    // IMMEDIATE optimistic update - no delay!
+    setPending(prev => {
+      if (isTemp && matchKey) {
+        return prev.filter(r => `${r.message}|${r.created_at}` !== matchKey);
+      }
+      return prev.filter(r => r.id !== id);
+    });
+    setCompleted(prev => {
+      if (isTemp && matchKey) {
+        return prev.filter(r => `${r.message}|${r.created_at}` !== matchKey);
+      }
+      return prev.filter(r => r.id !== id);
+    });
+
+    if (!skipAnimation) {
+      setLeavingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
 
     // Show toast with undo option immediately
@@ -173,18 +214,28 @@ export function useReminders() {
       });
     }
 
-    // Persist in background
-    invoke("delete_reminder", { id })
-      .then(() => emit("refresh-reminders"))
-      .then(() => invoke("sync_to_cloud_background"))
-      .catch((error) => {
-        console.error("Failed to delete reminder:", error);
-        showToast("Failed to delete task", "error");
-        refresh(); // Revert on error
-      });
+    // Persist in background - only if not a temp ID
+    if (!isTemp) {
+      invoke("delete_reminder", { id })
+        .then(() => emit("refresh-reminders"))
+        .then(() => invoke("sync_to_cloud_background"))
+        .catch((error) => {
+          console.error("Failed to delete reminder:", error);
+          showToast("Failed to delete task", "error");
+          refresh(); // Revert on error
+        });
+    } else {
+      // For temp IDs, just emit refresh for the bar
+      emit("refresh-reminders").catch(() => {});
+    }
   }, [refresh]);
 
   const updateReminder = useCallback(async (id: number, message: string, urgency: UrgencyType) => {
+    // Optimistic update FIRST
+    setPending(prev => prev.map(r =>
+      r.id === id ? { ...r, message, urgency } : r
+    ));
+
     setSyncing(true);
     try {
       await invoke("update_reminder", {
@@ -192,12 +243,14 @@ export function useReminders() {
         message,
         urgency,
       });
-      await refresh();
+      // Don't refresh - we already updated optimistically
       await emit("refresh-reminders");
       showToast("Task updated", "success");
     } catch (error) {
       console.error("Failed to update reminder:", error);
       showToast("Failed to update task", "error");
+      // Revert on error
+      await refresh();
     } finally {
       setSyncing(false);
     }
@@ -217,30 +270,38 @@ export function useReminders() {
       });
     });
 
-    // Persist in background - fire and forget for snappy UX
-    invoke("move_reminder", { id, toList })
-      .then(() => emit("refresh-reminders"))
-      .then(() => invoke("sync_to_cloud_background"))
-      .catch((error) => {
-        console.error("Failed to move reminder:", error);
-        showToast("Failed to move task", "error");
-        refresh(); // Revert on error
-      });
+    // Only call backend for real IDs
+    if (id >= 0) {
+      invoke("move_reminder", { id, toList })
+        .then(() => emit("refresh-reminders"))
+        .then(() => invoke("sync_to_cloud_background"))
+        .catch((error) => {
+          console.error("Failed to move reminder:", error);
+          showToast("Failed to move task", "error");
+          refresh(); // Revert on error
+        });
+    } else {
+      emit("refresh-reminders").catch(() => {});
+    }
   }, [refresh]);
 
   const setUrgency = useCallback((id: number, urgency: UrgencyType) => {
     // Optimistic update: update locally first for instant feedback
     setPending(prev => prev.map(r => r.id === id ? { ...r, urgency } : r));
 
-    // Persist in background - fire and forget for snappy UX
-    invoke("set_urgency", { id, urgency })
-      .then(() => emit("refresh-reminders"))
-      .then(() => invoke("sync_to_cloud_background"))
-      .catch((error) => {
-        console.error("Failed to set urgency:", error);
-        showToast("Failed to update urgency", "error");
-        refresh(); // Revert on error
-      });
+    // Only call backend for real IDs
+    if (id >= 0) {
+      invoke("set_urgency", { id, urgency })
+        .then(() => emit("refresh-reminders"))
+        .then(() => invoke("sync_to_cloud_background"))
+        .catch((error) => {
+          console.error("Failed to set urgency:", error);
+          showToast("Failed to update urgency", "error");
+          refresh(); // Revert on error
+        });
+    } else {
+      emit("refresh-reminders").catch(() => {});
+    }
   }, [refresh]);
 
   const refreshFromCloud = useCallback(async () => {
@@ -281,9 +342,14 @@ export function useReminders() {
       return reordered;
     });
 
+    // Filter out temp IDs for backend call
+    const realIds = orderedIds.filter(id => id >= 0);
+
     // Persist locally (fast), then sync to cloud in background
     try {
-      await invoke("reorder_reminders", { orderedIds });
+      if (realIds.length > 0) {
+        await invoke("reorder_reminders", { orderedIds: realIds });
+      }
       await emit("refresh-reminders");
       // Cloud sync in background - don't await
       invoke("sync_to_cloud_background").catch((e) => {
