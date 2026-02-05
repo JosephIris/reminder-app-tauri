@@ -82,10 +82,11 @@ impl Storage {
         self.use_drive = true;
 
         // Find or create reminders.json in Drive
-        let folder_id = self.folder_id.as_ref().ok_or("No folder ID")?;
-        let access_token = self.access_token.as_ref().ok_or("No access token")?;
+        // Clone values to avoid borrow conflicts with refresh_access_token
+        let folder_id = self.folder_id.clone().ok_or("No folder ID")?;
+        let access_token = self.access_token.clone().ok_or("No access token")?;
 
-        match drive::find_or_create_drive_file(access_token, folder_id, &self.data) {
+        match drive::find_or_create_drive_file(&access_token, &folder_id, &self.data) {
             Ok(file_id) => {
                 self.file_id = Some(file_id);
             }
@@ -94,7 +95,7 @@ impl Storage {
                 self.refresh_access_token()?;
                 let access_token = self.access_token.as_ref().ok_or("No access token")?;
                 self.file_id =
-                    Some(drive::find_or_create_drive_file(access_token, folder_id, &self.data)?);
+                    Some(drive::find_or_create_drive_file(access_token, &folder_id, &self.data)?);
             }
             Err(e) => return Err(e),
         }
@@ -371,7 +372,7 @@ impl Storage {
             .find(|r| r.id == id)
             .map(|r| r.list_type.clone());
 
-        let current_list = match current_list {
+        let _current_list = match current_list {
             Some(list) if list == to_list => return Ok(()),
             Some(list) => list,
             None => return Ok(()),

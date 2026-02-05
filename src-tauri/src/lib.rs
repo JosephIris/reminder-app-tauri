@@ -18,7 +18,7 @@ use tauri::{
     WebviewUrl,
     WebviewWindowBuilder,
 };
-use chrono::{Datelike, Timelike};
+use chrono::Datelike;
 use config::{BAR_HEIGHT, DEFAULT_DRIVE_FOLDER_ID, ORGANIZE_PROMPT_HOURS, ORGANIZE_PROMPT_WINDOW_MINUTES};
 use reminder::{ListType, Reminder, Urgency};
 use storage::{OAuthCredentials, Storage};

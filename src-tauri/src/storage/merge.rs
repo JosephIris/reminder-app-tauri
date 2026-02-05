@@ -1,4 +1,4 @@
-use crate::reminder::{ListType, Reminder};
+use crate::reminder::Reminder;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -76,7 +76,7 @@ pub fn merge_stores(local: &ReminderStore, cloud: &ReminderStore) -> ReminderSto
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reminder::Urgency;
+    use crate::reminder::{ListType, Urgency};
     use chrono::Utc;
 
     fn make_reminder(id: i64, created_at: &str) -> Reminder {
