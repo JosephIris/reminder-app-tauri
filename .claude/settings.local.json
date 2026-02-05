@@ -35,7 +35,9 @@
       "Bash(git pull:*)",
       "Bash(npm run check:*)",
       "Bash(cargo build:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(git fetch:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

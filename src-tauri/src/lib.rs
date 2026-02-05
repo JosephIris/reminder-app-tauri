@@ -1,8 +1,12 @@
-mod storage;
-mod reminder;
 mod appbar;
-mod urlencoding;
+mod config;
+mod error;
+mod reminder;
+mod storage;
 mod updater;
+mod urlencoding;
+
+pub use error::{AppError, AppResult};
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,9 +18,10 @@ use tauri::{
     WebviewUrl,
     WebviewWindowBuilder,
 };
-use storage::{Storage, OAuthCredentials};
-use reminder::{Reminder, Urgency, ListType};
 use chrono::{Datelike, Timelike};
+use config::{BAR_HEIGHT, DEFAULT_DRIVE_FOLDER_ID, ORGANIZE_PROMPT_HOURS, ORGANIZE_PROMPT_WINDOW_MINUTES};
+use reminder::{ListType, Reminder, Urgency};
+use storage::{OAuthCredentials, Storage};
 
 /// Monitor Windows display changes and power events to reposition the reminder bar
 /// Listens for WM_DISPLAYCHANGE (resolution/monitor changes) and WM_POWERBROADCAST (resume from sleep)
@@ -152,13 +157,13 @@ fn start_organize_prompt_scheduler(app_handle: tauri::AppHandle) {
             let minute = now.minute();
             let day = now.ordinal();
 
-            // Only trigger during the first 5 minutes of the trigger hours
-            if minute >= 5 {
+            // Only trigger during the first N minutes of the trigger hours
+            if minute >= ORGANIZE_PROMPT_WINDOW_MINUTES {
                 continue;
             }
 
-            // Check if this is a trigger time (8, 13, 18)
-            let is_trigger_time = hour == 8 || hour == 13 || hour == 18;
+            // Check if this is a trigger time
+            let is_trigger_time = ORGANIZE_PROMPT_HOURS.contains(&hour);
             if !is_trigger_time {
                 continue;
             }
@@ -434,7 +439,7 @@ fn save_oauth_credentials(
     let credentials = OAuthCredentials {
         client_id,
         client_secret,
-        folder_id: folder_id.unwrap_or_else(|| "1F0qYeAVU_7H73kX9uz-1ZF3i2KS_V-mk".to_string()),
+        folder_id: folder_id.unwrap_or_else(|| DEFAULT_DRIVE_FOLDER_ID.to_string()),
     };
     storage.save_oauth_credentials(&credentials)
 }
@@ -709,7 +714,7 @@ async fn show_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
     println!("Work area: x={}, y={}, w={}, h={}", work_x, work_y, work_width, work_height);
 
     // Bar dimensions - needs to fit: card (44px) + wrapper padding (4px) + vertical padding (12px) = 60px
-    let bar_height = 60;
+    let bar_height = BAR_HEIGHT;
 
     // Use 98% of work area width, centered
     let bar_width = (work_width as f64 * 0.98) as i32;
@@ -845,7 +850,7 @@ async fn reposition_reminder_bar(app: tauri::AppHandle) -> Result<(), String> {
     {
         if let Ok(hwnd) = window.hwnd() {
             let hwnd_val = hwnd.0 as isize;
-            let bar_height = 60;
+            let bar_height = BAR_HEIGHT;
 
             // Unregister existing appbar
             appbar::unregister_appbar(hwnd_val);

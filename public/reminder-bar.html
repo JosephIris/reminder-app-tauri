@@ -98,7 +98,8 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        width: 100px;
+        min-width: 80px;
+        max-width: 280px;
         height: 44px;
         cursor: grab;
         overflow: visible;
@@ -208,8 +209,7 @@
         font-size: 12px;
         font-weight: 500;
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        overflow: visible;
         transition: font-size 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
@@ -285,7 +285,7 @@
 
       .drag-placeholder {
         flex-shrink: 0;
-        width: 100px;
+        min-width: 100px;
         height: 44px;
         background: rgba(99, 102, 241, 0.1);
         border: 2px dashed rgba(99, 102, 241, 0.4);
@@ -463,9 +463,10 @@
       window.addEventListener('beforeunload', cleanup);
 
       const cardConfigs = {
-        compact: { minWidth: 80, maxWidth: 140, height: 44 },
-        expanded: { minWidth: 120, maxWidth: 500, height: 44 },
-        focused: { minWidth: 200, maxWidth: 600, height: 50 }
+        // Auto-width: cards show full text up to maxWidth
+        compact: { minWidth: 80, maxWidth: 280, height: 44 },
+        expanded: { minWidth: 120, maxWidth: 400, height: 44 },
+        focused: { minWidth: 200, maxWidth: 500, height: 50 }
       };
 
       const measureCanvas = document.createElement('canvas');
@@ -482,14 +483,13 @@
         const textWidth = measureTextWidth(message, fontSize);
         let padding = 40;
 
-        if (state === 'compact') return config.maxWidth;
-
         if (state === 'focused') {
           const controlsWidth = 80;
           const idealWidth = textWidth + padding + controlsWidth;
           return Math.min(Math.max(idealWidth, config.minWidth), config.maxWidth);
         }
 
+        // All states now show full text (auto-width based on content)
         const idealWidth = textWidth + padding;
         return Math.min(Math.max(idealWidth, config.minWidth), config.maxWidth);
       }
@@ -498,6 +498,8 @@
         const config = cardConfigs[state] || cardConfigs.compact;
         const width = calculateCardWidth(message, state);
         card.style.width = width + 'px';
+        card.style.minWidth = cardConfigs.compact.minWidth + 'px';
+        card.style.maxWidth = config.maxWidth + 'px';
         card.style.height = config.height + 'px';
       }
 
