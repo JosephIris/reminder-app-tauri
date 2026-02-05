@@ -80,9 +80,15 @@ interface SettingsDialogProps {
   onRefreshFromCloud?: () => Promise<boolean>;
   onCheckForUpdates?: () => Promise<"available" | "up-to-date" | "error">;
   checkingForUpdates?: boolean;
+  syncStatus?: {
+    useDrive: boolean;
+    cloudDirty: boolean;
+    lastSyncTime: string | null;
+    lastSyncError: string | null;
+  };
 }
 
-export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates, checkingForUpdates }: SettingsDialogProps) {
+export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates, checkingForUpdates, syncStatus: parentSyncStatus }: SettingsDialogProps) {
   const [autoStart, setAutoStart] = useState(false);
   const [loading, setLoading] = useState(true);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
@@ -320,12 +326,23 @@ export function SettingsDialog({ onClose, onRefreshFromCloud, onCheckForUpdates,
             <p className="text-sm text-gray-400 mb-3">Google Drive Sync</p>
 
             {/* Status indicator */}
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-1">
               <div className={`w-2 h-2 rounded-full ${isLoggedIn ? "bg-green-500" : "bg-gray-500"}`} />
               <span className="text-sm text-gray-300">
                 {isLoggedIn ? "Connected to Google Drive" : hasCredentials ? "Not logged in" : "Not configured"}
               </span>
             </div>
+            {isLoggedIn && parentSyncStatus?.lastSyncTime && (
+              <p className="text-xs text-gray-500 mb-1 ml-4">
+                Last synced: {new Date(parentSyncStatus.lastSyncTime).toLocaleString()}
+              </p>
+            )}
+            {isLoggedIn && parentSyncStatus?.cloudDirty && (
+              <p className="text-xs text-yellow-400 mb-1 ml-4">
+                Unsynced local changes
+              </p>
+            )}
+            <div className="mb-3" />
 
             {/* Credentials form */}
             {showCredentialsForm && (

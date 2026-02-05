@@ -11,6 +11,12 @@ export function useReminders() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [leavingIds, setLeavingIds] = useState<Set<number>>(new Set());
+  const [syncStatus, setSyncStatus] = useState<{
+    useDrive: boolean;
+    cloudDirty: boolean;
+    lastSyncTime: string | null;
+    lastSyncError: string | null;
+  }>({ useDrive: false, cloudDirty: false, lastSyncTime: null, lastSyncError: null });
 
   // Refs for stable callback access to current state
   const pendingRef = useRef(pending);
@@ -85,7 +91,6 @@ export function useReminders() {
         });
         return emit("refresh-reminders");
       })
-      .then(() => invoke("sync_to_cloud_background"))
       .catch((error) => {
         console.error("Failed to add reminder:", error);
         showToast("Failed to add task", "error");
@@ -149,7 +154,6 @@ export function useReminders() {
     if (!isTemp) {
       invoke("complete_reminder", { id })
         .then(() => emit("refresh-reminders"))
-        .then(() => invoke("sync_to_cloud_background"))
         .catch((error) => {
           console.error("Failed to complete reminder:", error);
           showToast("Failed to complete task", "error");
@@ -218,7 +222,6 @@ export function useReminders() {
     if (!isTemp) {
       invoke("delete_reminder", { id })
         .then(() => emit("refresh-reminders"))
-        .then(() => invoke("sync_to_cloud_background"))
         .catch((error) => {
           console.error("Failed to delete reminder:", error);
           showToast("Failed to delete task", "error");
@@ -274,7 +277,6 @@ export function useReminders() {
     if (id >= 0) {
       invoke("move_reminder", { id, toList })
         .then(() => emit("refresh-reminders"))
-        .then(() => invoke("sync_to_cloud_background"))
         .catch((error) => {
           console.error("Failed to move reminder:", error);
           showToast("Failed to move task", "error");
@@ -293,7 +295,6 @@ export function useReminders() {
     if (id >= 0) {
       invoke("set_urgency", { id, urgency })
         .then(() => emit("refresh-reminders"))
-        .then(() => invoke("sync_to_cloud_background"))
         .catch((error) => {
           console.error("Failed to set urgency:", error);
           showToast("Failed to update urgency", "error");
@@ -351,10 +352,6 @@ export function useReminders() {
         await invoke("reorder_reminders", { orderedIds: realIds });
       }
       await emit("refresh-reminders");
-      // Cloud sync in background - don't await
-      invoke("sync_to_cloud_background").catch((e) => {
-        console.log("Background cloud sync skipped:", e);
-      });
     } catch (error) {
       console.error("Failed to reorder reminders:", error);
       showToast("Failed to save order", "error");
@@ -381,12 +378,15 @@ export function useReminders() {
     initAndSync();
   }, [refresh]);
 
-  // Periodic cloud sync every 5 minutes
+  // Periodic cloud sync every 2 minutes
   useEffect(() => {
-    const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes
+    const SYNC_INTERVAL = 2 * 60 * 1000; // 2 minutes
 
     const periodicSync = async () => {
       try {
+        // Retry any failed cloud syncs first
+        await invoke("sync_to_cloud_background").catch(() => {});
+        // Then do a full bidirectional sync
         const synced = await invoke<boolean>("refresh_from_cloud");
         if (synced) {
           await refresh();
@@ -401,6 +401,23 @@ export function useReminders() {
     return () => clearInterval(interval);
   }, [refresh]);
 
+  // Poll sync status every 30 seconds
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const [useDrive, cloudDirty, lastSyncTime, lastSyncError] =
+          await invoke<[boolean, boolean, string | null, string | null]>("get_sync_status");
+        setSyncStatus({ useDrive, cloudDirty, lastSyncTime, lastSyncError });
+      } catch (e) {
+        console.log("Sync status check failed:", e);
+      }
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   return {
     pending,
     actual,
@@ -409,6 +426,7 @@ export function useReminders() {
     stats,
     loading,
     syncing,
+    syncStatus,
     leavingIds,
     refresh,
     addReminder,

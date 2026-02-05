@@ -31,6 +31,7 @@ function App() {
     stats,
     loading,
     syncing,
+    syncStatus,
     leavingIds,
     addReminder,
     completeReminder,
@@ -131,15 +132,19 @@ function App() {
     };
   }, []);
 
-  // Listen for focus events - only refresh if window was unfocused for >30s
-  // This prevents wiping optimistic updates during normal bar interactions
+  // Listen for focus events - sync from cloud if window was unfocused for >30s
   useEffect(() => {
-    const unlisten = listen("tauri://focus", () => {
+    const unlisten = listen("tauri://focus", async () => {
       const timeSinceBlur = Date.now() - lastBlurTimeRef.current;
-      // Only refresh if window was unfocused for more than 30 seconds
-      // This handles multi-device sync while preserving optimistic updates
       if (lastBlurTimeRef.current > 0 && timeSinceBlur > 30000) {
-        refresh();
+        try {
+          await invoke("sync_to_cloud_background");
+          await invoke<boolean>("refresh_from_cloud");
+          await refresh();
+        } catch (e) {
+          console.log("Focus sync failed:", e);
+          refresh();
+        }
       }
     });
     return () => {
@@ -276,15 +281,57 @@ function App() {
           </div>
         )}
 
+        {/* Sync failure banner */}
+        {syncStatus.lastSyncError && !authExpired && (
+          <div className="mb-3 p-2 bg-red-500/15 border border-red-500/30 rounded-lg flex items-center justify-between">
+            <span className="text-xs text-red-300 truncate mr-2">
+              Sync failing: {syncStatus.lastSyncError}
+            </span>
+            <button
+              onClick={async () => {
+                try {
+                  await invoke("try_reconnect_drive");
+                  await refreshFromCloud();
+                } catch (e) {
+                  console.error("Reconnect failed:", e);
+                }
+              }}
+              className="px-2 py-1 bg-red-500/30 hover:bg-red-500/50 text-white text-xs rounded transition-colors flex-shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Stats bar */}
         <div className="flex items-center justify-between mb-3 px-1">
-          <div className="flex gap-4">
+          <div className="flex items-center gap-4">
             <span className="text-xs text-gray-500">
               <span className="text-accent-green font-medium">{stats.today}</span> today
             </span>
             <span className="text-xs text-gray-500">
               <span className="text-accent-blue font-medium">{stats.week}</span> this week
             </span>
+            {syncStatus.useDrive && (
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  syncStatus.lastSyncError
+                    ? "bg-red-500 animate-pulse"
+                    : syncStatus.cloudDirty
+                    ? "bg-yellow-500"
+                    : "bg-green-500"
+                }`}
+                title={
+                  syncStatus.lastSyncError
+                    ? `Sync error: ${syncStatus.lastSyncError}`
+                    : syncStatus.cloudDirty
+                    ? "Changes pending sync..."
+                    : syncStatus.lastSyncTime
+                    ? `Synced: ${new Date(syncStatus.lastSyncTime).toLocaleTimeString()}`
+                    : "Connected"
+                }
+              />
+            )}
           </div>
           <div className="flex gap-2">
             <button
@@ -409,6 +456,7 @@ function App() {
           onRefreshFromCloud={refreshFromCloud}
           onCheckForUpdates={checkForUpdates}
           checkingForUpdates={checkingForUpdates}
+          syncStatus={syncStatus}
         />
       )}
 

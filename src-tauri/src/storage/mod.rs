@@ -18,6 +18,9 @@ pub struct Storage {
     data: ReminderStore,
     app_data_path: PathBuf,
     use_drive: bool,
+    cloud_dirty: bool,
+    last_sync_time: Option<String>,
+    last_sync_error: Option<String>,
     access_token: Option<String>,
     refresh_token: Option<String>,
     client_id: Option<String>,
@@ -38,6 +41,9 @@ impl Storage {
             data: ReminderStore::default(),
             app_data_path,
             use_drive: false,
+            cloud_dirty: false,
+            last_sync_time: None,
+            last_sync_error: None,
             access_token: None,
             refresh_token: None,
             client_id: None,
@@ -191,17 +197,21 @@ impl Storage {
         self.save_local()?;
 
         if self.use_drive {
-            if let Err(e) = self.save_to_drive() {
-                eprintln!("Failed to save to Drive: {}", e);
-                return Err(format!("Saved locally but cloud sync failed: {}", e));
+            match self.save_to_drive() {
+                Ok(_) => {
+                    self.cloud_dirty = false;
+                    self.last_sync_time = Some(Utc::now().to_rfc3339());
+                    self.last_sync_error = None;
+                }
+                Err(e) => {
+                    eprintln!("Cloud sync failed, marking dirty: {}", e);
+                    self.cloud_dirty = true;
+                    self.last_sync_error = Some(e);
+                }
             }
         }
 
         Ok(())
-    }
-
-    fn save_local_only(&mut self) -> Result<(), String> {
-        self.save_local()
     }
 
     fn next_id(&self) -> i64 {
@@ -416,14 +426,14 @@ impl Storage {
             }
         }
 
-        self.save_local_only()?;
+        self.save()?;
         Ok(())
     }
 
     pub fn set_urgency(&mut self, id: i64, urgency: Urgency) -> Result<(), String> {
         if let Some(reminder) = self.data.pending.iter_mut().find(|r| r.id == id) {
             reminder.urgency = urgency;
-            self.save_local_only()?;
+            self.save()?;
         }
         Ok(())
     }
@@ -515,8 +525,17 @@ impl Storage {
             self.load_from_drive()?;
         }
 
-        if let Err(e) = self.save_to_drive() {
-            eprintln!("Warning: Failed to sync merged data to cloud: {}", e);
+        match self.save_to_drive() {
+            Ok(_) => {
+                self.cloud_dirty = false;
+                self.last_sync_time = Some(Utc::now().to_rfc3339());
+                self.last_sync_error = None;
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to sync merged data to cloud: {}", e);
+                self.cloud_dirty = true;
+                self.last_sync_error = Some(e);
+            }
         }
         self.save_local()?;
 
@@ -623,14 +642,73 @@ impl Storage {
                 reminder.sort_order = index as i64;
             }
         }
-        self.save_local()
+        self.save()
     }
 
     pub fn sync_to_cloud(&mut self) -> Result<(), String> {
         if self.use_drive {
-            self.save_to_drive()?;
+            match self.save_to_drive() {
+                Ok(_) => {
+                    self.cloud_dirty = false;
+                    self.last_sync_time = Some(Utc::now().to_rfc3339());
+                    self.last_sync_error = None;
+                }
+                Err(e) => {
+                    self.cloud_dirty = true;
+                    self.last_sync_error = Some(e.clone());
+                    return Err(e);
+                }
+            }
         }
         Ok(())
+    }
+
+    // ============ Sync Status Methods ============
+
+    pub fn retry_cloud_sync(&mut self) -> Result<bool, String> {
+        if !self.use_drive || !self.cloud_dirty {
+            return Ok(false);
+        }
+
+        match self.save_to_drive() {
+            Ok(_) => {
+                self.cloud_dirty = false;
+                self.last_sync_time = Some(Utc::now().to_rfc3339());
+                self.last_sync_error = None;
+                eprintln!("Retry cloud sync succeeded");
+                Ok(true)
+            }
+            Err(e) => {
+                eprintln!("Retry cloud sync still failing: {}", e);
+                self.last_sync_error = Some(e.clone());
+                Err(e)
+            }
+        }
+    }
+
+    pub fn get_sync_status(&self) -> (bool, bool, Option<String>, Option<String>) {
+        (
+            self.use_drive,
+            self.cloud_dirty,
+            self.last_sync_time.clone(),
+            self.last_sync_error.clone(),
+        )
+    }
+
+    pub fn try_reconnect_drive(&mut self) -> Result<bool, String> {
+        if self.use_drive {
+            return Ok(true);
+        }
+        match self.init_drive() {
+            Ok(_) => {
+                eprintln!("Drive reconnection succeeded");
+                Ok(true)
+            }
+            Err(e) => {
+                eprintln!("Drive reconnection failed: {}", e);
+                Err(e)
+            }
+        }
     }
 
     // ============ OAuth Methods ============
@@ -714,6 +792,9 @@ mod tests {
             data: store,
             app_data_path: PathBuf::from("/tmp/test"),
             use_drive: false,
+            cloud_dirty: false,
+            last_sync_time: None,
+            last_sync_error: None,
             access_token: None,
             refresh_token: None,
             client_id: None,
@@ -745,6 +826,9 @@ mod tests {
             data: store,
             app_data_path: PathBuf::from("/tmp/test"),
             use_drive: false,
+            cloud_dirty: false,
+            last_sync_time: None,
+            last_sync_error: None,
             access_token: None,
             refresh_token: None,
             client_id: None,

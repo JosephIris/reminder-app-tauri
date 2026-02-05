@@ -384,6 +384,7 @@ fn reorder_reminders(state: tauri::State<AppState>, ordered_ids: Vec<i64>) -> Re
 #[tauri::command]
 async fn sync_to_cloud_background(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut storage = state.lock_storage();
+    let _ = storage.retry_cloud_sync();
     storage.sync_to_cloud()
 }
 
@@ -396,8 +397,21 @@ fn refresh_from_cloud(state: tauri::State<AppState>) -> Result<bool, String> {
 #[tauri::command]
 fn sync_on_startup(state: tauri::State<AppState>) -> Result<bool, String> {
     let mut storage = state.lock_storage();
-    // Try to sync from cloud if connected
     storage.refresh_from_cloud()
+}
+
+#[tauri::command]
+fn get_sync_status(
+    state: tauri::State<AppState>,
+) -> Result<(bool, bool, Option<String>, Option<String>), String> {
+    let storage = state.lock_storage();
+    Ok(storage.get_sync_status())
+}
+
+#[tauri::command]
+fn try_reconnect_drive(state: tauri::State<AppState>) -> Result<bool, String> {
+    let mut storage = state.lock_storage();
+    storage.try_reconnect_drive()
 }
 
 #[tauri::command]
@@ -1128,6 +1142,8 @@ pub fn run() {
             show_quick_add,
             unregister_shortcuts,
             register_shortcuts,
+            get_sync_status,
+            try_reconnect_drive,
             get_oauth_status,
             check_auth_status,
             save_oauth_credentials,
